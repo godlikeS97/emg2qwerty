@@ -121,89 +121,6 @@ class RandomBandRotation:
 
 
 @dataclass
-class EnhancedElectrodeShift:
-    """More sophisticated simulation of electrode placement variations.
-    
-    This augmentation applies multiple types of variations to better simulate
-    real-world electrode placement differences:
-    1. Amplitude variations to simulate electrode-tissue contact differences
-    2. Enhanced channel rotation with greater shift range
-    3. Correlated variations to simulate crosstalk between electrodes
-    
-    The input must be of shape (T, arms, C) where:
-    - T: time steps
-    - arms: number of armbands (typically 2 for left/right)
-    - C: electrode channels per arm
-    
-    Args:
-        amp_min (float): Minimum amplitude scaling factor. (default: 0.85)
-        amp_max (float): Maximum amplitude scaling factor. (default: 1.15)
-        correlation_factor (float): Strength of inter-channel correlation. (default: 0.2)
-        max_channel_shift (int): Maximum number of positions to shift channels. (default: 2)
-        channel_dim (int): The electrode channel dimension. (default: -1)
-    """
-    
-    # Amplitude variation parameters
-    amp_min: float = 0.85
-    amp_max: float = 1.15
-    # Inter-channel correlation parameters
-    correlation_factor: float = 0.2
-    # Channel-wise shift parameters
-    max_channel_shift: int = 2
-    channel_dim: int = -1
-    
-    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
-        # Original shape: (T, arms, C) where C is channels
-        # Sometimes tensor can be (T, arms, C, F) for spectrograms
-        is_spectrogram = len(tensor.shape) > 3
-        
-        if is_spectrogram:
-            # For spectrograms, we'll apply the transform to each frequency bin
-            T, arms, C, F = tensor.shape
-            tensor_reshaped = tensor.permute(3, 0, 1, 2).reshape(F * T, arms, C)
-            result = self._apply_transform(tensor_reshaped)
-            return result.reshape(F, T, arms, C).permute(1, 2, 3, 0)
-        else:
-            # For raw signals, apply directly
-            return self._apply_transform(tensor)
-    
-    def _apply_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        T, arms, C = tensor.shape
-        
-        # 1. Apply amplitude variations to simulate electrode-tissue contact differences
-        amp_factors = torch.FloatTensor(1, arms, C).uniform_(self.amp_min, self.amp_max)
-        tensor = tensor * amp_factors.to(tensor.device)
-        
-        # 2. Apply enhanced channel rotation (more than just shifting by 1)
-        for arm_idx in range(arms):
-            # Different random shift for each arm
-            shift = torch.randint(-self.max_channel_shift, self.max_channel_shift+1, (1,)).item()
-            if shift != 0:
-                tensor[:, arm_idx] = torch.roll(tensor[:, arm_idx], shift, dims=self.channel_dim)
-        
-        # 3. Add correlated variations to simulate crosstalk between electrodes
-        if self.correlation_factor > 0:
-            noise = torch.randn(T, arms, C).to(tensor.device) * self.correlation_factor
-            
-            # Smooth the noise to create correlation between adjacent channels
-            # We'll reshape to apply a 1D convolution across channels
-            noise_reshaped = noise.transpose(1, 2).reshape(-1, 1, C)
-            weights = torch.ones(3, 1, 1).to(tensor.device) / 3
-            
-            # Apply 1D convolution for smoothing (similar to avg_pool1d but preserves shape with padding)
-            padded = torch.nn.functional.pad(noise_reshaped, (1, 1), mode='replicate')
-            smoothed = torch.nn.functional.conv1d(padded, weights, padding=0)
-            
-            # Reshape back to original shape
-            smoothed_noise = smoothed.reshape(T, arms, C)
-            
-            # Add the correlated noise
-            tensor = tensor + smoothed_noise
-            
-        return tensor
-
-
-@dataclass
 class TemporalAlignmentJitter:
     """Applies a temporal jittering augmentation that randomly jitters the
     alignment of left and right EMG data by up to ``max_offset`` timesteps.
@@ -326,3 +243,84 @@ class SpecAugment:
 
         # (..., C, freq, T) -> (T, ..., C, freq)
         return x.movedim(-1, 0)
+
+
+@dataclass
+class TemporalScaling:
+    """Applies random temporal scaling (time warping) to EMG signals.
+    
+    This transform simulates natural variations in typing speed and rhythm
+    by stretching or compressing the time dimension of the EMG signal.
+    The input must be of shape (T, ...) where T is the time dimension.
+    
+    Args:
+        min_scale (float): Minimum scaling factor (values < 1.0 slow down the signal)
+        max_scale (float): Maximum scaling factor (values > 1.0 speed up the signal)
+        time_dim (int): The time dimension to scale (default: 0)
+    """
+    
+    min_scale: float = 0.9  # Slow down to 90%
+    max_scale: float = 1.1  # Speed up to 110%
+    time_dim: int = 0
+    
+    def __post_init__(self) -> None:
+        assert 0.0 < self.min_scale <= self.max_scale, "Scaling factors must be positive with min_scale <= max_scale"
+    
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Choose random scaling factor
+        scale_factor = torch.FloatTensor(1).uniform_(self.min_scale, self.max_scale).item()
+        
+        # Original sequence length in the time dimension
+        seq_len = tensor.shape[self.time_dim]
+        
+        # Target length after scaling
+        new_len = int(seq_len * scale_factor)
+        
+        # Ensure we have at least 1 timestep
+        new_len = max(1, new_len)
+        
+        # Get original shape for later reshaping
+        original_shape = tensor.shape
+        
+        # Handle dimensionality: we need to reshape to a 3D tensor for interpolation
+        # where the last dimension is time (required by F.interpolate with mode='linear')
+        
+        # First move time to the last dimension
+        tensor_t_last = tensor.movedim(self.time_dim, -1)
+        
+        # Reshape to (C, H, T) format needed for linear interpolation
+        # Flatten all dimensions except the last (time) into a single batch dim
+        reshaped_tensor = tensor_t_last.reshape(-1, 1, tensor_t_last.shape[-1])
+        
+        # Apply interpolation (now with proper 3D input)
+        scaled_tensor = torch.nn.functional.interpolate(
+            reshaped_tensor,
+            size=new_len,
+            mode='linear',
+            align_corners=False
+        )
+        
+        # Reshape back to original dimensions but with new time length
+        new_shape = list(tensor_t_last.shape)
+        new_shape[-1] = scaled_tensor.shape[-1]
+        scaled_tensor = scaled_tensor.reshape(new_shape)
+        
+        # Move time dimension back to original position
+        scaled_tensor = scaled_tensor.movedim(-1, self.time_dim)
+        
+        # Crop or pad to match original length
+        if new_len > seq_len:
+            # Crop to original length
+            slices = [slice(None)] * tensor.ndim
+            slices[self.time_dim] = slice(0, seq_len)
+            return scaled_tensor[tuple(slices)]
+        elif new_len < seq_len:
+            # Pad to original length
+            padding = list(original_shape)
+            padding[self.time_dim] = seq_len - new_len
+            padding_tensor = torch.zeros(padding, dtype=tensor.dtype, device=tensor.device)
+            
+            # Concatenate along time dimension
+            return torch.cat([scaled_tensor, padding_tensor], dim=self.time_dim)
+        else:
+            return scaled_tensor

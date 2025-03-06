@@ -1,0 +1,49 @@
+# @package _global_
+# Transform pipeline with temporal scaling for improved single-user performance
+
+to_tensor:
+  _target_: emg2qwerty.transforms.ToTensor
+  fields: [emg_left, emg_right]
+
+temporal_scaling:
+  _target_: emg2qwerty.transforms.TemporalScaling
+  min_scale: 0.85  # Slow down to 85%
+  max_scale: 1.15  # Speed up to 115%
+  time_dim: 0
+
+band_rotation:
+  _target_: emg2qwerty.transforms.ForEach  # i.i.d rotation offset for each band
+  transform:
+    _target_: emg2qwerty.transforms.RandomBandRotation
+    offsets: [-1, 0, 1]
+
+temporal_jitter:
+  _target_: emg2qwerty.transforms.TemporalAlignmentJitter
+  max_offset: 150  # Enhanced jitter (75ms at 2kHz)
+
+logspec:
+  _target_: emg2qwerty.transforms.LogSpectrogram
+  n_fft: 64
+  hop_length: 16  # Downsamples from 2kHz to 125Hz
+
+specaug:
+  _target_: emg2qwerty.transforms.SpecAugment
+  n_time_masks: 4  # Enhanced from 3
+  time_mask_param: 30  # Enhanced from 25 (240ms per mask at 125Hz)
+  n_freq_masks: 3  # Enhanced from 2
+  freq_mask_param: 5  # Enhanced from 4
+
+transforms:
+  train:
+    - ${to_tensor}
+    - ${temporal_scaling}
+    - ${band_rotation}
+    - ${temporal_jitter}
+    - ${logspec}
+    - ${specaug}
+
+  val:
+    - ${to_tensor}
+    - ${logspec}
+
+  test: ${transforms.val} 
