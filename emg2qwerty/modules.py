@@ -278,3 +278,61 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+class LSTMEncoder(nn.Module):
+    """An LSTM-based encoder to replace the TDSConvEncoder.
+    
+    Args:
+        input_size (int): ``input_size`` for an input of shape (T, N, input_size).
+        hidden_size (int): The size of the hidden state in the LSTM.
+        num_layers (int): Number of LSTM layers.
+        dropout (float): Dropout rate (applied between LSTM layers).
+        bidirectional (bool): Whether to use a bidirectional LSTM.
+    """
+    
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int = 384,
+        num_layers: int = 2,
+        dropout: float = 0.1,
+        bidirectional: bool = True,
+    ) -> None:
+        super().__init__()
+        
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=bidirectional,
+            batch_first=False,  # Keep time-first format (T, N, features)
+        )
+        
+        # Output projection to maintain same feature dimensionality as input
+        output_size = hidden_size * 2 if bidirectional else hidden_size
+        self.projection = nn.Linear(output_size, input_size)
+        
+        # Layer normalization for stability
+        self.layer_norm = nn.LayerNorm(input_size)
+    
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: Input tensor of shape (T, N, input_size)
+            
+        Returns:
+            Tensor of shape (T, N, input_size)
+        """
+        # Run LSTM
+        outputs, _ = self.lstm(inputs)
+        
+        # Project back to input dimension
+        outputs = self.projection(outputs)
+        
+        # Add residual connection and layer norm (similar to TDS blocks)
+        outputs = outputs + inputs
+        outputs = self.layer_norm(outputs)
+        
+        return outputs  # (T, N, input_size)
