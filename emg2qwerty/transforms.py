@@ -228,7 +228,7 @@ class SpecAugment:
         )
 
     def __call__(self, specgram: torch.Tensor) -> torch.Tensor:
-        # (T, ..., C, freq) -> (..., C, freq, T)
+        # (T', 2, C, freq) -> (2, C, freq, T')
         x = specgram.movedim(0, -1)
 
         # Time masks
@@ -242,7 +242,7 @@ class SpecAugment:
             x = self.freq_mask(x, mask_value=self.mask_value)
 
         # (..., C, freq, T) -> (T, ..., C, freq)
-        return x.movedim(-1, 0)
+        return x.movedim(-1, 0)  # (T', 2, C, freq)
 
 
 @dataclass

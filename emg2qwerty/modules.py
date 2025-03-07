@@ -33,7 +33,7 @@ class SpectrogramNorm(nn.Module):
         self.batch_norm = nn.BatchNorm2d(channels)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        T, N, bands, C, freq = inputs.shape  # (T, N, bands=2, C=16, freq)
+        T, N, bands, C, freq = inputs.shape  # (T, N=batch_, bands=2, C=16, freq)
         assert self.channels == bands * C
 
         x = inputs.movedim(0, -1)  # (N, bands=2, C=16, freq, T)
@@ -90,7 +90,7 @@ class RotationInvariantMLP(nn.Module):
         self.offsets = offsets if len(offsets) > 0 else (0,)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        x = inputs  # (T, N, C, ...)
+        x = inputs  # (T, N, C, ...)  (T, N, bands=2, C=16, freq)
 
         # Create a new dim for band rotation augmentation with each entry
         # corresponding to the original tensor with its electrode channels
