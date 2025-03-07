@@ -228,7 +228,7 @@ class SpecAugment:
         )
 
     def __call__(self, specgram: torch.Tensor) -> torch.Tensor:
-        # (T, ..., C, freq) -> (..., C, freq, T)
+        # (T', 2, C, freq) -> (2, C, freq, T')
         x = specgram.movedim(0, -1)
 
         # Time masks
@@ -242,4 +242,85 @@ class SpecAugment:
             x = self.freq_mask(x, mask_value=self.mask_value)
 
         # (..., C, freq, T) -> (T, ..., C, freq)
-        return x.movedim(-1, 0)
+        return x.movedim(-1, 0)  # (T', 2, C, freq)
+
+
+@dataclass
+class TemporalScaling:
+    """Applies random temporal scaling (time warping) to EMG signals.
+    
+    This transform simulates natural variations in typing speed and rhythm
+    by stretching or compressing the time dimension of the EMG signal.
+    The input must be of shape (T, ...) where T is the time dimension.
+    
+    Args:
+        min_scale (float): Minimum scaling factor (values < 1.0 slow down the signal)
+        max_scale (float): Maximum scaling factor (values > 1.0 speed up the signal)
+        time_dim (int): The time dimension to scale (default: 0)
+    """
+    
+    min_scale: float = 0.9  # Slow down to 90%
+    max_scale: float = 1.1  # Speed up to 110%
+    time_dim: int = 0
+    
+    def __post_init__(self) -> None:
+        assert 0.0 < self.min_scale <= self.max_scale, "Scaling factors must be positive with min_scale <= max_scale"
+    
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Choose random scaling factor
+        scale_factor = torch.FloatTensor(1).uniform_(self.min_scale, self.max_scale).item()
+        
+        # Original sequence length in the time dimension
+        seq_len = tensor.shape[self.time_dim]
+        
+        # Target length after scaling
+        new_len = int(seq_len * scale_factor)
+        
+        # Ensure we have at least 1 timestep
+        new_len = max(1, new_len)
+        
+        # Get original shape for later reshaping
+        original_shape = tensor.shape
+        
+        # Handle dimensionality: we need to reshape to a 3D tensor for interpolation
+        # where the last dimension is time (required by F.interpolate with mode='linear')
+        
+        # First move time to the last dimension
+        tensor_t_last = tensor.movedim(self.time_dim, -1)
+        
+        # Reshape to (C, H, T) format needed for linear interpolation
+        # Flatten all dimensions except the last (time) into a single batch dim
+        reshaped_tensor = tensor_t_last.reshape(-1, 1, tensor_t_last.shape[-1])
+        
+        # Apply interpolation (now with proper 3D input)
+        scaled_tensor = torch.nn.functional.interpolate(
+            reshaped_tensor,
+            size=new_len,
+            mode='linear',
+            align_corners=False
+        )
+        
+        # Reshape back to original dimensions but with new time length
+        new_shape = list(tensor_t_last.shape)
+        new_shape[-1] = scaled_tensor.shape[-1]
+        scaled_tensor = scaled_tensor.reshape(new_shape)
+        
+        # Move time dimension back to original position
+        scaled_tensor = scaled_tensor.movedim(-1, self.time_dim)
+        
+        # Crop or pad to match original length
+        if new_len > seq_len:
+            # Crop to original length
+            slices = [slice(None)] * tensor.ndim
+            slices[self.time_dim] = slice(0, seq_len)
+            return scaled_tensor[tuple(slices)]
+        elif new_len < seq_len:
+            # Pad to original length
+            padding = list(original_shape)
+            padding[self.time_dim] = seq_len - new_len
+            padding_tensor = torch.zeros(padding, dtype=tensor.dtype, device=tensor.device)
+            
+            # Concatenate along time dimension
+            return torch.cat([scaled_tensor, padding_tensor], dim=self.time_dim)
+        else:
+            return scaled_tensor
