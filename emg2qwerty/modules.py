@@ -280,6 +280,137 @@ class TDSConvEncoder(nn.Module):
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
 
 
+class PositionalEncoding(nn.Module):
+    """Positional encoding for transformer model.
+    Based on the original implementation in the 'Attention Is All You Need' paper.
+    
+    Args:
+        d_model (int): The dimension of the transformer model.
+        dropout (float): Dropout rate for the positional encoding.
+        max_len (int): Maximum sequence length for positional encoding.
+    """
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        self.d_model = d_model
+
+        # Create positional encoding matrix
+        import math
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+        
+        # Save these for generating extra positions if needed
+        self.register_buffer('div_term', div_term)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor of shape (seq_len, batch_size, d_model)
+        """
+        seq_len = x.size(0)
+        
+        # If sequence length is longer than our precomputed positional encodings
+        if seq_len > self.pe.size(0):
+            # Generate additional positional encodings
+            import math
+            additional_len = seq_len - self.pe.size(0)
+            # Make sure position is on the same device as x
+            position = torch.arange(self.pe.size(0), seq_len, device=x.device).unsqueeze(1)
+            additional_pe = torch.zeros(additional_len, 1, self.d_model, device=x.device)
+            additional_pe[:, 0, 0::2] = torch.sin(position * self.div_term)
+            additional_pe[:, 0, 1::2] = torch.cos(position * self.div_term)
+            
+            # Concatenate with existing pe
+            pe_extended = torch.cat([self.pe.to(x.device), additional_pe], dim=0)
+            
+            # Use the extended positional encoding
+            x = x + pe_extended[:seq_len]
+        else:
+            # Standard case - use precomputed positional encoding
+            x = x + self.pe[:seq_len].to(x.device)
+            
+        return self.dropout(x)
+
+
+class TransformerEncoder(nn.Module):
+    """Transformer encoder for EMG sequence modeling.
+    Combines custom components with PyTorch's TransformerEncoder.
+    
+    Args:
+        num_features (int): Input feature dimension size.
+        d_model (int): Hidden dimension of the transformer model.
+        nhead (int): Number of attention heads.
+        num_encoder_layers (int): Number of transformer encoder layers.
+        dim_feedforward (int): Dimension of the feedforward network.
+        dropout (float): Dropout rate.
+        activation (str): Activation function to use (relu or gelu).
+        max_seq_length (int): Maximum sequence length for positional encoding.
+    """
+    def __init__(
+        self, 
+        num_features: int,
+        d_model: int = 384,
+        nhead: int = 8,
+        num_encoder_layers: int = 6,
+        dim_feedforward: int = 1024,
+        dropout: float = 0.1,
+        activation: str = "gelu",
+        max_seq_length: int = 500
+    ):
+        super().__init__()
+        
+        # Project input features to transformer dimension
+        self.input_projection = nn.Linear(num_features, d_model)
+        
+        # Positional encoding
+        self.pos_encoder = PositionalEncoding(
+            d_model=d_model,
+            dropout=dropout,
+            max_len=max_seq_length
+        )
+        
+        # Transformer encoder layer
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            batch_first=False,  # PyTorch expects (seq_len, batch, features)
+            norm_first=True     # Pre-norm architecture for better stability
+        )
+        
+        # Full transformer encoder
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer=encoder_layer,
+            num_layers=num_encoder_layers
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through transformer encoder.
+        
+        Args:
+            x: Input tensor of shape (T, N, features)
+            
+        Returns:
+            Tensor of shape (T, N, d_model)
+        """
+        # Project to transformer dimension
+        x = self.input_projection(x)
+        
+        # Add positional encoding
+        x = self.pos_encoder(x)
+        
+        # Apply transformer encoder
+        x = self.transformer(x)
+        
+        return x
+
+
 class LSTMEncoder(nn.Module):
     """An LSTM-based encoder to replace the TDSConvEncoder.
     
