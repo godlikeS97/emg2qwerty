@@ -11,5 +11,4 @@ python -m emg2qwerty.train \
   +trainer.gradient_clip_val=1.0 \
   trainer.max_epochs=200 \
   batch_size=64 \
-  seed=42 \
-  decoder.blank_threshold=0.35
+  seed=42 
