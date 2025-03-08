@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import nn
@@ -349,6 +350,8 @@ class TransformerEncoder(nn.Module):
         dropout (float): Dropout rate.
         activation (str): Activation function to use (relu or gelu).
         max_seq_length (int): Maximum sequence length for positional encoding.
+        norm_first (bool): Whether to use pre-normalization (default: True).
+        layer_norm_eps (float): Epsilon for layer normalization (default: 1e-5).
     """
     def __init__(
         self, 
@@ -359,7 +362,9 @@ class TransformerEncoder(nn.Module):
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
         activation: str = "gelu",
-        max_seq_length: int = 500
+        max_seq_length: int = 500,
+        norm_first: bool = True,
+        layer_norm_eps: float = 1e-5
     ):
         super().__init__()
         
@@ -381,7 +386,8 @@ class TransformerEncoder(nn.Module):
             dropout=dropout,
             activation=activation,
             batch_first=False,  # PyTorch expects (seq_len, batch, features)
-            norm_first=True     # Pre-norm architecture for better stability
+            norm_first=norm_first,  # Pre-norm architecture for better stability
+            layer_norm_eps=layer_norm_eps  # Customize LayerNorm epsilon
         )
         
         # Full transformer encoder
@@ -390,11 +396,12 @@ class TransformerEncoder(nn.Module):
             num_layers=num_encoder_layers
         )
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_key_padding_mask: torch.Tensor = None) -> torch.Tensor:
         """Forward pass through transformer encoder.
         
         Args:
             x: Input tensor of shape (T, N, features)
+            src_key_padding_mask: Optional mask for padded positions (N, T)
             
         Returns:
             Tensor of shape (T, N, d_model)
@@ -405,23 +412,22 @@ class TransformerEncoder(nn.Module):
         # Add positional encoding
         x = self.pos_encoder(x)
         
-        # Apply transformer encoder
-        x = self.transformer(x)
+        # Apply transformer encoder with optional mask
+        x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
         
         return x
 
 
 class LSTMEncoder(nn.Module):
-    """An LSTM-based encoder to replace the TDSConvEncoder.
+    """LSTM encoder for EMG sequence modeling.
     
     Args:
-        input_size (int): ``input_size`` for an input of shape (T, N, input_size).
-        hidden_size (int): The size of the hidden state in the LSTM.
+        input_size (int): Input feature dimension size.
+        hidden_size (int): Hidden dimension of the LSTM model.
         num_layers (int): Number of LSTM layers.
-        dropout (float): Dropout rate (applied between LSTM layers).
-        bidirectional (bool): Whether to use a bidirectional LSTM.
+        dropout (float): Dropout rate.
+        bidirectional (bool): Whether to use bidirectional LSTM.
     """
-    
     def __init__(
         self,
         input_size: int,
@@ -432,38 +438,38 @@ class LSTMEncoder(nn.Module):
     ) -> None:
         super().__init__()
         
+        # LSTM takes care of its own initialization
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0,
+            dropout=dropout if num_layers > 1 else 0.0,
             bidirectional=bidirectional,
-            batch_first=False,  # Keep time-first format (T, N, features)
+            batch_first=False,  # Match TDS-Conv behavior: (T, N, features)
         )
         
-        # Output projection to maintain same feature dimensionality as input
-        output_size = hidden_size * 2 if bidirectional else hidden_size
-        self.projection = nn.Linear(output_size, input_size)
-        
-        # Layer normalization for stability
-        self.layer_norm = nn.LayerNorm(input_size)
+        # Projection needed if using bidirectional LSTM
+        self.output_size = hidden_size * (2 if bidirectional else 1)
+        if self.output_size != input_size:
+            self.projection = nn.Linear(self.output_size, input_size)
+        else:
+            self.projection = nn.Identity()
     
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
+        """Forward pass through LSTM encoder.
+        
         Args:
-            inputs: Input tensor of shape (T, N, input_size)
+            inputs: Tensor of shape (T, N, input_size)
             
         Returns:
             Tensor of shape (T, N, input_size)
         """
-        # Run LSTM
+        # LSTM forward pass
         outputs, _ = self.lstm(inputs)
         
-        # Project back to input dimension
-        outputs = self.projection(outputs)
+        # Project back to input size if necessary
+        if self.output_size != inputs.shape[2]:
+            outputs = self.projection(outputs)
         
-        # Add residual connection and layer norm (similar to TDS blocks)
-        outputs = outputs + inputs
-        outputs = self.layer_norm(outputs)
-        
-        return outputs  # (T, N, input_size)
+        return outputs
+

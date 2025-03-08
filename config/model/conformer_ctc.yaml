@@ -1,0 +1,26 @@
+# @package _global_
+
+# Conformer model configuration
+# This model combines convolution and transformer architectures
+# for more effective EMG-to-text decoding
+module:
+  _target_: emg2qwerty.lightning.ConformerCTCModule
+  in_features: 528  # freq * channels = (n_fft // 2 + 1) * 16 = 33 * 16
+  mlp_features: [384]  # Hidden dimension for rotation-invariant MLP
+  
+  # Conformer model parameters
+  d_model: 256  # Model dimension (smaller than transformer for efficiency)
+  nhead: 4     # Number of attention heads (reduced from standard transformer)
+  num_encoder_layers: 6  # Number of conformer blocks
+  d_ff: 2048   # Feed-forward hidden dimension 
+  kernel_size: 31  # Kernel size for depthwise convolution (large for capturing temporal patterns)
+  expansion_factor: 2  # Channel expansion in convolution module
+  dropout: 0.15  # Slightly higher dropout for regularization
+  activation: "swish"  # Swish activation typically performs better
+  max_seq_length: 1000  # Maximum sequence length for positional encoding
+
+# Data configuration - same as other models for fair comparison
+datamodule:
+  _target_: emg2qwerty.lightning.WindowedEMGDataModule
+  window_length: 8000  # 4 sec windows for 2kHz EMG
+  padding: [1800, 200]  # 900ms past context, 100ms future context 
