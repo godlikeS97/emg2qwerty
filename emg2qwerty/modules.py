@@ -9,6 +9,7 @@ from typing import Optional
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 
 class SpectrogramNorm(nn.Module):
@@ -473,3 +474,97 @@ class LSTMEncoder(nn.Module):
         
         return outputs
 
+class CNNLSTMEncoder(nn.Module):
+    """A hybrid CNN + LSTM encoder that first uses convolutional layers to
+    extract local features, then uses LSTM layers to model temporal dependencies.
+    
+    Args:
+        num_features (int): Number of input features (C).
+        cnn_channels (list): List of output channels for each CNN block.
+        kernel_size (int): Kernel size for each convolution.
+        lstm_hidden_size (int): Hidden size for the LSTM layers.
+        lstm_num_layers (int): Number of LSTM layers.
+        dropout (float): Dropout probability for LSTM layers.
+    """
+    
+    def __init__(
+        self,
+        num_features: int,
+        cnn_channels: Sequence[int] = (64, 128, 256),
+        kernel_size: int = 5,
+        lstm_hidden_size: int = 512,
+        lstm_num_layers: int = 3,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        
+        # CNN layers to extract local features
+        cnn_layers: list[nn.Module] = []
+        in_channels = num_features  # C
+
+        # 注意：如果 T 不是很大，kernel_size=5 + 多次池化可能导致输出维度过小甚至为 0
+        # 可尝试改小 kernel_size=3，或者减少池化层数
+        for out_channels in cnn_channels:
+            cnn_layers.extend([
+                nn.Conv1d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    padding=kernel_size // 2,  # same padding
+                ),
+                nn.BatchNorm1d(out_channels),
+                nn.ReLU(),
+                # 这里每加一次 MaxPool(stride=2)，时间维度就会减半
+                nn.MaxPool1d(kernel_size=2, stride=2),
+            ])
+            in_channels = out_channels
+        
+        self.cnn = nn.Sequential(*cnn_layers)
+        
+        # LSTM layers for temporal modeling
+        self.lstm = nn.LSTM(
+            input_size=cnn_channels[-1],
+            hidden_size=lstm_hidden_size,
+            num_layers=lstm_num_layers,
+            dropout=dropout if lstm_num_layers > 1 else 0.0,
+            bidirectional=True,
+            batch_first=False,  # Expect (time, batch, channels)
+        )
+        
+        # Final projection to maintain consistent output size
+        # 双向 LSTM 输出维度 = 2 * lstm_hidden_size
+        self.projection = nn.Linear(lstm_hidden_size * 2, num_features)
+    
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: (T, N, C)  # time, batch, features
+        Returns:
+            outputs: (T, N, C)  # 与输入时间维度一致 (如果使用了上采样)
+        """
+        T, N, C = inputs.shape
+        
+        # 1) 重新排列为 (N, C, T)，让 T 成为 CNN 的卷积/池化方向
+        x = inputs.permute(1, 2, 0)  # (N, C, T)
+        
+        # 2) 经过 CNN 模块后，形状 (N, out_channels, T')
+        x = self.cnn(x)  # 多层卷积+池化后，时间维度 T -> T'
+        
+        # 3) 变回 (T', N, out_channels)，以便喂入 LSTM
+        x = x.permute(2, 0, 1)  # (T', N, out_channels)
+        
+        # 4) LSTM 前向
+        x, _ = self.lstm(x)  # (T', N, 2*lstm_hidden_size)
+        
+        # 5) 投影回 num_features
+        x = self.projection(x)  # (T', N, num_features)
+        
+        # ============== 可选：上采样回原始 T ==============
+        # 如果希望输出与输入时间序列等长 (T)，可以插值上采样
+        # 如果不需要等长，去掉这一步，直接 return x
+        x = x.permute(1, 2, 0)  # (N, num_features, T')
+        x = F.interpolate(x, size=T, mode='linear', align_corners=False)  # (N, num_features, T)
+        x = x.permute(2, 0, 1)  # (T, N, num_features)
+        # =============================================
+        
+        return x

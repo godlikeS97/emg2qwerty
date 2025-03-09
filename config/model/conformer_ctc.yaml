@@ -1,8 +1,7 @@
 # @package _global_
 
-# Conformer model configuration
-# This model combines convolution and transformer architectures
-# for more effective EMG-to-text decoding
+# Conformer model configuration with enhanced regularization
+# and attention masking to reduce insertion errors
 module:
   _target_: emg2qwerty.lightning.ConformerCTCModule
   in_features: 528  # freq * channels = (n_fft // 2 + 1) * 16 = 33 * 16
@@ -11,13 +10,18 @@ module:
   # Conformer model parameters
   d_model: 256  # Model dimension (smaller than transformer for efficiency)
   nhead: 4     # Number of attention heads (reduced from standard transformer)
-  num_encoder_layers: 6  # Number of conformer blocks
-  d_ff: 2048   # Feed-forward hidden dimension 
-  kernel_size: 31  # Kernel size for depthwise convolution (large for capturing temporal patterns)
+  num_encoder_layers: 4  # Reduced from 6 to decrease model capacity
+  d_ff: 1024   # Reduced from 2048 to prevent overfitting
+  kernel_size: 31  # Kernel size for depthwise convolution
   expansion_factor: 2  # Channel expansion in convolution module
-  dropout: 0.15  # Slightly higher dropout for regularization
+  dropout: 0.35  # Increased from 0.15 for stronger regularization
+  attention_dropout: 0.35  # Specific dropout for attention modules
+  conv_dropout: 0.3  # Specific dropout for convolution modules
   activation: "swish"  # Swish activation typically performs better
   max_seq_length: 1000  # Maximum sequence length for positional encoding
+  norm_first: True  # Pre-normalization (more stable)
+  enforce_mask: True  # Strictly enforce attention masking (important!)
+  layer_dropout: 0.05  # Chance to drop entire layers during training
 
 # Data configuration - same as other models for fair comparison
 datamodule:

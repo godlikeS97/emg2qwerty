@@ -2,6 +2,6 @@
 optimizer:
   _target_: torch.optim.AdamW
   lr: 2e-4  # Lower learning rate for stability
-  weight_decay: 0.05  # Significantly increase weight decay for stronger regularization
+  weight_decay: 0.1  # Increased from 0.05 for stronger regularization
   betas: [0.9, 0.98]  # Beta values recommended for transformers
   eps: 1e-8 
