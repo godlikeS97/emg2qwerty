@@ -1,3 +1,4 @@
 # @package _global_
 decoder:
   _target_: emg2qwerty.decoder.CTCGreedyDecoder
+  blank_threshold: 0.5  # Increased from 0.35 to be more aggressive against insertions

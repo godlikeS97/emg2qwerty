@@ -1,0 +1,12 @@
+# @package _global_
+callbacks:
+  - _target_: pytorch_lightning.callbacks.LearningRateMonitor
+  - _target_: pytorch_lightning.callbacks.ModelCheckpoint
+    dirpath: ${hydra:runtime.output_dir}/checkpoints
+    monitor: ${monitor_metric}
+    mode: ${monitor_mode}
+    save_last: True
+    verbose: True
+  - _target_: emg2qwerty.callbacks.DecodingVisualizationCallback
+    num_samples: 5
+    log_dir: ${hydra:runtime.output_dir}/decoding_visualization 

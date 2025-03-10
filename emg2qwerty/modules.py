@@ -5,9 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 
 class SpectrogramNorm(nn.Module):
@@ -349,6 +351,8 @@ class TransformerEncoder(nn.Module):
         dropout (float): Dropout rate.
         activation (str): Activation function to use (relu or gelu).
         max_seq_length (int): Maximum sequence length for positional encoding.
+        norm_first (bool): Whether to use pre-normalization (default: True).
+        layer_norm_eps (float): Epsilon for layer normalization (default: 1e-5).
     """
     def __init__(
         self, 
@@ -359,7 +363,9 @@ class TransformerEncoder(nn.Module):
         dim_feedforward: int = 1024,
         dropout: float = 0.1,
         activation: str = "gelu",
-        max_seq_length: int = 500
+        max_seq_length: int = 500,
+        norm_first: bool = True,
+        layer_norm_eps: float = 1e-5
     ):
         super().__init__()
         
@@ -381,7 +387,8 @@ class TransformerEncoder(nn.Module):
             dropout=dropout,
             activation=activation,
             batch_first=False,  # PyTorch expects (seq_len, batch, features)
-            norm_first=True     # Pre-norm architecture for better stability
+            norm_first=norm_first,  # Pre-norm architecture for better stability
+            layer_norm_eps=layer_norm_eps  # Customize LayerNorm epsilon
         )
         
         # Full transformer encoder
@@ -390,11 +397,12 @@ class TransformerEncoder(nn.Module):
             num_layers=num_encoder_layers
         )
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_key_padding_mask: torch.Tensor = None) -> torch.Tensor:
         """Forward pass through transformer encoder.
         
         Args:
             x: Input tensor of shape (T, N, features)
+            src_key_padding_mask: Optional mask for padded positions (N, T)
             
         Returns:
             Tensor of shape (T, N, d_model)
@@ -405,23 +413,22 @@ class TransformerEncoder(nn.Module):
         # Add positional encoding
         x = self.pos_encoder(x)
         
-        # Apply transformer encoder
-        x = self.transformer(x)
+        # Apply transformer encoder with optional mask
+        x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
         
         return x
 
 
 class LSTMEncoder(nn.Module):
-    """An LSTM-based encoder to replace the TDSConvEncoder.
+    """LSTM encoder for EMG sequence modeling.
     
     Args:
-        input_size (int): ``input_size`` for an input of shape (T, N, input_size).
-        hidden_size (int): The size of the hidden state in the LSTM.
+        input_size (int): Input feature dimension size.
+        hidden_size (int): Hidden dimension of the LSTM model.
         num_layers (int): Number of LSTM layers.
-        dropout (float): Dropout rate (applied between LSTM layers).
-        bidirectional (bool): Whether to use a bidirectional LSTM.
+        dropout (float): Dropout rate.
+        bidirectional (bool): Whether to use bidirectional LSTM.
     """
-    
     def __init__(
         self,
         input_size: int,
@@ -432,38 +439,132 @@ class LSTMEncoder(nn.Module):
     ) -> None:
         super().__init__()
         
+        # LSTM takes care of its own initialization
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0,
+            dropout=dropout if num_layers > 1 else 0.0,
             bidirectional=bidirectional,
-            batch_first=False,  # Keep time-first format (T, N, features)
+            batch_first=False,  # Match TDS-Conv behavior: (T, N, features)
         )
         
-        # Output projection to maintain same feature dimensionality as input
-        output_size = hidden_size * 2 if bidirectional else hidden_size
-        self.projection = nn.Linear(output_size, input_size)
-        
-        # Layer normalization for stability
-        self.layer_norm = nn.LayerNorm(input_size)
+        # Projection needed if using bidirectional LSTM
+        self.output_size = hidden_size * (2 if bidirectional else 1)
+        if self.output_size != input_size:
+            self.projection = nn.Linear(self.output_size, input_size)
+        else:
+            self.projection = nn.Identity()
     
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
+        """Forward pass through LSTM encoder.
+        
         Args:
-            inputs: Input tensor of shape (T, N, input_size)
+            inputs: Tensor of shape (T, N, input_size)
             
         Returns:
             Tensor of shape (T, N, input_size)
         """
-        # Run LSTM
+        # LSTM forward pass
         outputs, _ = self.lstm(inputs)
         
-        # Project back to input dimension
-        outputs = self.projection(outputs)
+        # Project back to input size if necessary
+        if self.output_size != inputs.shape[2]:
+            outputs = self.projection(outputs)
         
-        # Add residual connection and layer norm (similar to TDS blocks)
-        outputs = outputs + inputs
-        outputs = self.layer_norm(outputs)
+        return outputs
+
+class CNNLSTMEncoder(nn.Module):
+    """A hybrid CNN + LSTM encoder that first uses convolutional layers to
+    extract local features, then uses LSTM layers to model temporal dependencies.
+    
+    Args:
+        num_features (int): Number of input features (C).
+        cnn_channels (list): List of output channels for each CNN block.
+        kernel_size (int): Kernel size for each convolution.
+        lstm_hidden_size (int): Hidden size for the LSTM layers.
+        lstm_num_layers (int): Number of LSTM layers.
+        dropout (float): Dropout probability for LSTM layers.
+    """
+    
+    def __init__(
+        self,
+        num_features: int,
+        cnn_channels: Sequence[int] = (64, 128, 256),
+        kernel_size: int = 5,
+        lstm_hidden_size: int = 512,
+        lstm_num_layers: int = 3,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
         
-        return outputs  # (T, N, input_size)
+        # CNN layers to extract local features
+        cnn_layers: list[nn.Module] = []
+        in_channels = num_features  # C
+
+        # 注意：如果 T 不是很大，kernel_size=5 + 多次池化可能导致输出维度过小甚至为 0
+        # 可尝试改小 kernel_size=3，或者减少池化层数
+        for out_channels in cnn_channels:
+            cnn_layers.extend([
+                nn.Conv1d(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=kernel_size,
+                    padding=kernel_size // 2,  # same padding
+                ),
+                nn.BatchNorm1d(out_channels),
+                nn.ReLU(),
+                # 这里每加一次 MaxPool(stride=2)，时间维度就会减半
+                nn.MaxPool1d(kernel_size=2, stride=2),
+            ])
+            in_channels = out_channels
+        
+        self.cnn = nn.Sequential(*cnn_layers)
+        
+        # LSTM layers for temporal modeling
+        self.lstm = nn.LSTM(
+            input_size=cnn_channels[-1],
+            hidden_size=lstm_hidden_size,
+            num_layers=lstm_num_layers,
+            dropout=dropout if lstm_num_layers > 1 else 0.0,
+            bidirectional=True,
+            batch_first=False,  # Expect (time, batch, channels)
+        )
+        
+        # Final projection to maintain consistent output size
+        # 双向 LSTM 输出维度 = 2 * lstm_hidden_size
+        self.projection = nn.Linear(lstm_hidden_size * 2, num_features)
+    
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: (T, N, C)  # time, batch, features
+        Returns:
+            outputs: (T, N, C)  # 与输入时间维度一致 (如果使用了上采样)
+        """
+        T, N, C = inputs.shape
+        
+        # 1) 重新排列为 (N, C, T)，让 T 成为 CNN 的卷积/池化方向
+        x = inputs.permute(1, 2, 0)  # (N, C, T)
+        
+        # 2) 经过 CNN 模块后，形状 (N, out_channels, T')
+        x = self.cnn(x)  # 多层卷积+池化后，时间维度 T -> T'
+        
+        # 3) 变回 (T', N, out_channels)，以便喂入 LSTM
+        x = x.permute(2, 0, 1)  # (T', N, out_channels)
+        
+        # 4) LSTM 前向
+        x, _ = self.lstm(x)  # (T', N, 2*lstm_hidden_size)
+        
+        # 5) 投影回 num_features
+        x = self.projection(x)  # (T', N, num_features)
+        
+        # ============== 可选：上采样回原始 T ==============
+        # 如果希望输出与输入时间序列等长 (T)，可以插值上采样
+        # 如果不需要等长，去掉这一步，直接 return x
+        x = x.permute(1, 2, 0)  # (N, num_features, T')
+        x = F.interpolate(x, size=T, mode='linear', align_corners=False)  # (N, num_features, T)
+        x = x.permute(2, 0, 1)  # (T, N, num_features)
+        # =============================================
+        
+        return x

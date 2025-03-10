@@ -105,6 +105,8 @@ class Decoder(abc.ABC):
 
 @dataclass
 class CTCGreedyDecoder(Decoder):
+    blank_threshold: float = 0.0  # Threshold for blank prediction
+    
     def __post_init__(self) -> None:
         self.reset()
 
@@ -123,7 +125,19 @@ class CTCGreedyDecoder(Decoder):
         assert emissions.shape[1] == self._charset.num_classes
         assert len(emissions) == len(timestamps)
 
-        for label, timestamp in zip(emissions.argmax(-1), timestamps):
+        for t, (emission, timestamp) in enumerate(zip(emissions, timestamps)):
+            # Get the most likely label and its probability
+            label = emission.argmax()
+            prob = emission[label]
+            
+            # Compare blank probability with threshold to control insertions
+            blank_prob = emission[self._charset.null_class]
+            if blank_prob >= self.blank_threshold:
+                # Favor blank when its probability is high enough
+                if label != self._charset.null_class and blank_prob >= prob * 0.8:
+                    label = self._charset.null_class
+                    
+            # Apply standard CTC decoding logic
             if label != self._charset.null_class and label != self.prev_label:
                 self.decoding.append(label)
                 self.timestamps.append(timestamp)
@@ -263,12 +277,12 @@ class BeamState:
         probability of 1 for ending in blank and 0 for non-blank.
 
         The label trie is initialized with the blank label at the root
-        and the LM trie with KenLM state corresponding to `<s>`."""
+        and the LM trie with KenLM state corresponding to ``."""
 
         # Label trie root with blank label and timestamp of 0
         label_node = TrieNode(value=(blank_label, 0))
 
-        # LM trie root with KenLM state corresponding to `<s>` and 0 score
+        # LM trie root with KenLM state corresponding to `` and 0 score
         lm_node = None
         if lm is not None:
             lm_state = kenlm.State()
@@ -379,7 +393,7 @@ class CTCBeamDecoder(Decoder):
     care is taken to update LM states taking deletion into account.
     For example, if the best sequence of tokens is `c z ⌫ a t', the output
     decoding will be just that. But the LM score will be that of 'c a t',
-    i.e., P(c | <s>) * P(a | <s> c) * P(t | <s> c a).
+    i.e., P(c | ) * P(a |  c) * P(t |  c a).
     This is ensured by maintaining two separate tries - one for the decoded
     label sequence and the other to keep track of LM states/scores. They differ
     in their updates only on encountering deletes, but are otherwise the same.
@@ -408,8 +422,8 @@ class CTCBeamDecoder(Decoder):
             character set if applicable. (default: "Key.backspace")
     """
 
-    EOW: ClassVar[str] = "</s>"  # KenLM EOS token, used here as end-of-word
-    OOV: ClassVar[str] = "<unk>"  # KenLM out-of-vocabulary (OOV) token
+    EOW: ClassVar[str] = "␤"  # KenLM EOS token, used here as end-of-word
+    OOV: ClassVar[str] = "␤"  # KenLM out-of-vocabulary (OOV) token
 
     beam_size: int = 50
     max_labels_per_timestep: int = -1
@@ -424,7 +438,7 @@ class CTCBeamDecoder(Decoder):
         if self.lm_path is not None:
             self.lm = kenlm.Model(self.lm_path)
 
-            # KenLM state corresponding to beginning-of-sentence token <s>, but
+            # KenLM state corresponding to beginning-of-sentence token ␤, but
             # actually meaning beginning-of-word (BOW) in our usage.
             self.lm_state_bow = kenlm.State()
             self.lm.BeginSentenceWrite(self.lm_state_bow)
@@ -435,8 +449,8 @@ class CTCBeamDecoder(Decoder):
             # We rely on the fact that KenLM interpolates unigrams with the
             # uniform distribution `backoff(null) / |vocab|` for OOV tokens.
             # We set bos and eos to False while computing the score below
-            # so that the OOV score is equal to that of the unigram '<unk>'
-            # and not the trigram '<s><unk></s>'.
+            # so that the OOV score is equal to that of the unigram '␤'
+            # and not the trigram '␤␤␤'.
             self.oov_score = self.lm.score(self.OOV, bos=False, eos=False)
 
         self.delete_label: int | None = None
@@ -522,7 +536,7 @@ class CTCBeamDecoder(Decoder):
 
     def finish(self) -> LabelData:
         """To be called at the end of the sequence to finish any pending
-        LM states by adding end-of-word </s> tokens."""
+        LM states by adding end-of-word ␤ tokens."""
         if not self.lm:
             # Nothing to do, just return the best decoding
             return LabelData.from_labels(
@@ -613,7 +627,7 @@ class CTCBeamDecoder(Decoder):
         next KenLM state on applying the token as well as the LM score.
 
         For tokens not in LM vocabulary, we return a default baseline score
-        that is equal to the unigram `<unk>` score of the KenLM model
+        that is equal to the unigram `␤` score of the KenLM model
         corresponding to OOV tokens."""
         assert self.lm is not None
         assert not self.is_delete_label(label)
@@ -625,16 +639,16 @@ class CTCBeamDecoder(Decoder):
             lm_score = self.lm.BaseScore(prev_lm_state, key, lm_state)
         elif prev_lm_state != self.lm_state_bow:
             # LM states corresponding to tokens not in LM vocab are set to
-            # `self.lm_state_bow` corresponding to <s>. Therefore, if the prev
-            # LM state isn't <s> and we have an OOV token now, we end the word
+            # `self.lm_state_bow` corresponding to ␤. Therefore, if the prev
+            # LM state isn't ␤ and we have an OOV token now, we end the word
             # and overwrite the LM state to `self.lm_state_bow` to begin
             # the next word.
             lm_state = kenlm.State()
             lm_score = self.lm.BaseScore(prev_lm_state, self.EOW, lm_state)
             lm_state = self.lm_state_bow
         else:
-            # Prev LM state corresponds to <s>, but we have an OOV token.
-            # Set this LM state to <s> as well to begin the next word.
+            # Prev LM state corresponds to ␤, but we have an OOV token.
+            # Set this LM state to ␤ as well to begin the next word.
             lm_score = self.oov_score
             lm_state = self.lm_state_bow
 
