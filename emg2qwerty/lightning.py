@@ -397,14 +397,36 @@ class LSTMCTCModule(pl.LightningModule):
         
         # Update metrics
         metrics = self.metrics[f"{phase}_metrics"]
-        targets = targets.detach().cpu().numpy()
-        target_lengths = target_lengths.detach().cpu().numpy()
+        targets_np = targets.detach().cpu().numpy()
+        target_lengths_np = target_lengths.detach().cpu().numpy()
+        
+        # Collect sample predictions for visualization (up to 5 samples)
+        sample_predictions = []
+        for i in range(min(N, 5)):
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
+            prediction = predictions[i]
+            
+            # Calculate CER for this sample
+            editops = Levenshtein.editops(prediction.text, target.text)
+            edits = sum(1 for _ in editops)
+            cer = (edits / len(target) * 100.0) if len(target) > 0 else 0.0
+            
+            sample_predictions.append({
+                'prediction': prediction,
+                'target': target,
+                'cer': cer
+            })
+        
+        # Update metrics for all samples
         for i in range(N):
-            # Unpad targets (T, N) for batch entry
-            target = LabelData.from_labels(targets[: target_lengths[i], i])
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
             metrics.update(prediction=predictions[i], target=target)
         
         self.log(f"{phase}/loss", loss, batch_size=N, sync_dist=True)
+        
+        # Store sample predictions as an attribute for the callback to access
+        setattr(self, f"{phase}_sample_predictions", sample_predictions)
+        
         return loss
     
     def _epoch_end(self, phase: str) -> None:
@@ -546,7 +568,7 @@ class TransformerCTCModule(pl.LightningModule):
         N = len(input_lengths)  # batch_size
 
         # Apply gradient clipping in training phase
-        if phase == "train" and hasattr(self.trainer, "gradient_clip_val") and self.trainer.gradient_clip_val > 0:
+        if phase == "train" and hasattr(self.trainer, "gradient_clip_val") and self.trainer.gradient_clip_val is not None and self.trainer.gradient_clip_val > 0:
             self.clip_gradients(
                 optimizer=self.optimizers(), 
                 gradient_clip_val=self.trainer.gradient_clip_val, 
@@ -583,10 +605,32 @@ class TransformerCTCModule(pl.LightningModule):
             metrics = self.metrics[f"{phase}_metrics"]
             targets_np = targets.detach().cpu().numpy()
             target_lengths_np = target_lengths.detach().cpu().numpy()
+            
+            # Collect sample predictions for visualization (up to 5 samples)
+            sample_predictions = []
+            for i in range(min(N, 5)):
+                target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
+                prediction = predictions[i]
+                
+                # Calculate CER for this sample
+                editops = Levenshtein.editops(prediction.text, target.text)
+                edits = sum(1 for _ in editops)
+                cer = (edits / len(target) * 100.0) if len(target) > 0 else 0.0
+                
+                sample_predictions.append({
+                    'prediction': prediction,
+                    'target': target,
+                    'cer': cer
+                })
+            
+            # Update metrics for all samples
             for i in range(N):
                 # Unpad targets (T, N) for batch entry
                 target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
                 metrics.update(prediction=predictions[i], target=target)
+                
+            # Store sample predictions as an attribute for the callback to access
+            setattr(self, f"{phase}_sample_predictions", sample_predictions)
 
         return loss
 
@@ -774,7 +818,7 @@ class ConformerCTCModule(pl.LightningModule):
         N = len(input_lengths)  # batch_size
 
         # Apply gradient clipping in training phase
-        if phase == "train" and hasattr(self.trainer, "gradient_clip_val") and self.trainer.gradient_clip_val > 0:
+        if phase == "train" and hasattr(self.trainer, "gradient_clip_val") and self.trainer.gradient_clip_val is not None and self.trainer.gradient_clip_val > 0:
             self.clip_gradients(
                 optimizer=self.optimizers(), 
                 gradient_clip_val=self.trainer.gradient_clip_val, 
@@ -811,10 +855,32 @@ class ConformerCTCModule(pl.LightningModule):
             metrics = self.metrics[f"{phase}_metrics"]
             targets_np = targets.detach().cpu().numpy()
             target_lengths_np = target_lengths.detach().cpu().numpy()
+            
+            # Collect sample predictions for visualization (up to 5 samples)
+            sample_predictions = []
+            for i in range(min(N, 5)):
+                target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
+                prediction = predictions[i]
+                
+                # Calculate CER for this sample
+                editops = Levenshtein.editops(prediction.text, target.text)
+                edits = sum(1 for _ in editops)
+                cer = (edits / len(target) * 100.0) if len(target) > 0 else 0.0
+                
+                sample_predictions.append({
+                    'prediction': prediction,
+                    'target': target,
+                    'cer': cer
+                })
+            
+            # Update metrics for all samples
             for i in range(N):
                 # Unpad targets (T, N) for batch entry
                 target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
                 metrics.update(prediction=predictions[i], target=target)
+                
+            # Store sample predictions as an attribute for the callback to access
+            setattr(self, f"{phase}_sample_predictions", sample_predictions)
 
         return loss
 
