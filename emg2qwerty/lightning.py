@@ -11,6 +11,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pytorch_lightning as pl
 import torch
+import Levenshtein
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
@@ -234,14 +235,36 @@ class TDSConvCTCModule(pl.LightningModule):
 
         # Update metrics
         metrics = self.metrics[f"{phase}_metrics"]
-        targets = targets.detach().cpu().numpy()
-        target_lengths = target_lengths.detach().cpu().numpy()
+        targets_np = targets.detach().cpu().numpy()
+        target_lengths_np = target_lengths.detach().cpu().numpy()
+        
+        # Collect sample predictions for visualization (up to 5 samples)
+        sample_predictions = []
+        for i in range(min(N, 5)):
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
+            prediction = predictions[i]
+            
+            # Calculate CER for this sample
+            editops = Levenshtein.editops(prediction.text, target.text)
+            edits = sum(1 for _ in editops)
+            cer = (edits / len(target) * 100.0) if len(target) > 0 else 0.0
+            
+            sample_predictions.append({
+                'prediction': prediction,
+                'target': target,
+                'cer': cer
+            })
+        
+        # Update metrics for all samples
         for i in range(N):
-            # Unpad targets (T, N) for batch entry
-            target = LabelData.from_labels(targets[: target_lengths[i], i])
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
             metrics.update(prediction=predictions[i], target=target)
 
         self.log(f"{phase}/loss", loss, batch_size=N, sync_dist=True)
+        
+        # Store sample predictions as an attribute for the callback to access
+        setattr(self, f"{phase}_sample_predictions", sample_predictions)
+        
         return loss
 
     def _epoch_end(self, phase: str) -> None:
@@ -251,6 +274,7 @@ class TDSConvCTCModule(pl.LightningModule):
         metrics.reset()
 
     def training_step(self, *args, **kwargs) -> torch.Tensor:
+        # Return only the loss tensor for automatic optimization
         return self._step("train", *args, **kwargs)
 
     def validation_step(self, *args, **kwargs) -> torch.Tensor:
@@ -893,7 +917,6 @@ class CNNLSTMCTCModule(pl.LightningModule):
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.model(inputs)
 
-    # 其余方法与 TDSConvCTCModule 相同，可以直接复用
     def _step(
         self, phase: str, batch: dict[str, torch.Tensor], *args, **kwargs
     ) -> torch.Tensor:
@@ -927,14 +950,36 @@ class CNNLSTMCTCModule(pl.LightningModule):
 
         # Update metrics
         metrics = self.metrics[f"{phase}_metrics"]
-        targets = targets.detach().cpu().numpy()
-        target_lengths = target_lengths.detach().cpu().numpy()
+        targets_np = targets.detach().cpu().numpy()
+        target_lengths_np = target_lengths.detach().cpu().numpy()
+        
+        # Collect sample predictions for visualization (up to 5 samples)
+        sample_predictions = []
+        for i in range(min(N, 5)):
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
+            prediction = predictions[i]
+            
+            # Calculate CER for this sample
+            editops = Levenshtein.editops(prediction.text, target.text)
+            edits = sum(1 for _ in editops)
+            cer = (edits / len(target) * 100.0) if len(target) > 0 else 0.0
+            
+            sample_predictions.append({
+                'prediction': prediction,
+                'target': target,
+                'cer': cer
+            })
+        
+        # Update metrics for all samples
         for i in range(N):
-            # Unpad targets (T, N) for batch entry
-            target = LabelData.from_labels(targets[: target_lengths[i], i])
+            target = LabelData.from_labels(targets_np[: target_lengths_np[i], i])
             metrics.update(prediction=predictions[i], target=target)
 
         self.log(f"{phase}/loss", loss, batch_size=N, sync_dist=True)
+        
+        # Store sample predictions as an attribute for the callback to access
+        setattr(self, f"{phase}_sample_predictions", sample_predictions)
+        
         return loss
 
     def _epoch_end(self, phase: str) -> None:
@@ -943,6 +988,7 @@ class CNNLSTMCTCModule(pl.LightningModule):
         metrics.reset()
 
     def training_step(self, *args, **kwargs) -> torch.Tensor:
+        # Return only the loss tensor for automatic optimization
         return self._step("train", *args, **kwargs)
 
     def validation_step(self, *args, **kwargs) -> torch.Tensor:

@@ -11,4 +11,5 @@ python -m emg2qwerty.train \
   +trainer.gradient_clip_val=1.0 \
   trainer.max_epochs=200 \
   batch_size=64 \
-  seed=42 
+  seed=42 \
+  +callback=decoding_visualization 
