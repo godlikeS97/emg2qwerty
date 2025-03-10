@@ -324,3 +324,160 @@ class TemporalScaling:
             return torch.cat([scaled_tensor, padding_tensor], dim=self.time_dim)
         else:
             return scaled_tensor
+
+
+@dataclass
+class BandpassFilter:
+    """Applies bandpass filtering to EMG signals to reduce noise and focus on
+    the most informative frequency range for muscle activity.
+    
+    The filter is implemented in the frequency domain using FFT.
+    The input must be of shape (T, ...) where T is the time dimension.
+    
+    Args:
+        low_cut (float): Lower cutoff frequency in Hz. Frequencies below this will be attenuated.
+        high_cut (float): Upper cutoff frequency in Hz. Frequencies above this will be attenuated.
+        sample_rate (float): Sampling rate of the EMG signal in Hz.
+        time_dim (int): The time dimension to filter (default: 0)
+        transition_width (float): Width of the transition band as a fraction of the cutoff frequency.
+    """
+    
+    low_cut: float = 20.0  # Lower cutoff frequency in Hz
+    high_cut: float = 450.0  # Upper cutoff frequency in Hz
+    sample_rate: float = 2000.0  # EMG sample rate (Hz)
+    time_dim: int = 0
+    transition_width: float = 0.1  # Transition width as fraction of cutoff
+    
+    def __post_init__(self) -> None:
+        assert 0 < self.low_cut < self.high_cut < self.sample_rate / 2, \
+            f"Invalid frequency range: low_cut={self.low_cut}, high_cut={self.high_cut}, " \
+            f"sample_rate/2={self.sample_rate/2}"
+    
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Move time dimension to last position for FFT
+        x = tensor.movedim(self.time_dim, -1)
+        
+        # Get original shape and time length
+        orig_shape = x.shape
+        time_length = orig_shape[-1]
+        
+        # Reshape to 2D for batch processing: (batch, time)
+        x_flat = x.reshape(-1, time_length)
+        x_filtered = self._apply_bandpass(x_flat)
+        
+        # Reshape back to original dimensions
+        x_filtered = x_filtered.reshape(orig_shape)
+        
+        # Move time dimension back to original position
+        return x_filtered.movedim(-1, self.time_dim)
+    
+    def _apply_bandpass(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply bandpass filter to batched 2D input of shape (batch, time)"""
+        # Get FFT
+        X = torch.fft.rfft(x, dim=-1)
+        
+        # Construct frequency array
+        freqs = torch.fft.rfftfreq(x.shape[-1], d=1.0/self.sample_rate)
+        
+        # Create bandpass filter mask with smooth transitions
+        low_mask = self._transition_band(
+            freqs, self.low_cut * (1 - self.transition_width), self.low_cut
+        )
+        high_mask = 1 - self._transition_band(
+            freqs, self.high_cut, self.high_cut * (1 + self.transition_width)
+        )
+        mask = low_mask * high_mask
+        
+        # Apply filter
+        X_filtered = X * mask.to(X.device)
+        
+        # Inverse FFT to get back to time domain
+        x_filtered = torch.fft.irfft(X_filtered, n=x.shape[-1], dim=-1)
+        
+        return x_filtered
+    
+    def _transition_band(self, freqs: torch.Tensor, f0: float, f1: float) -> torch.Tensor:
+        """Create a smooth transition band between f0 and f1 using cosine transition"""
+        mask = torch.ones_like(freqs, dtype=torch.float32)
+        
+        # Transition band indices
+        idx = (freqs >= f0) & (freqs <= f1)
+        
+        if idx.any():
+            # Apply cosine transition (Tukey window segment)
+            mask[idx] = 0.5 * (1 + torch.cos(
+                torch.pi * (freqs[idx] - f0) / (f1 - f0) + torch.pi
+            ))
+        
+        # Set mask to 0 for all frequencies below f0
+        mask[freqs < f0] = 0.0
+        
+        return mask
+
+@dataclass
+class CrossChannelMixing:
+    """Creates synthetic EMG channels by mixing existing channels.
+    
+    This transform helps simulate electrode cross-talk and variations in
+    electrode placement, improving model robustness to these factors.
+    
+    The input must be of shape (T, B, C) where:
+      - T is time dimension
+      - B is band dimension (left/right hand)
+      - C is channel dimension (number of electrodes)
+    
+    Args:
+        mix_ratio_range (tuple[float, float]): Range of mixing ratios to sample from.
+            Values closer to (0.5, 0.5) create more balanced mixes, while values
+            closer to (0.0, 1.0) keep more of the original signal.
+        num_channels_to_mix (int): Number of channels to apply mixing to.
+            If set to -1, applies to all channels.
+        seed (int): Random seed for reproducibility. None for random behavior.
+    """
+    
+    mix_ratio_range: tuple[float, float] = (0.1, 0.3)  
+    num_channels_to_mix: int = 8  # Mix half of the 16 channels by default
+    seed: int | None = None
+    
+    def __post_init__(self) -> None:
+        assert 0 <= self.mix_ratio_range[0] <= self.mix_ratio_range[1] <= 0.5, \
+            "Mix ratio range must be between 0 and 0.5 with min <= max"
+        
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+            
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Expect (Time, Band, Channel) format
+        assert tensor.ndim >= 3, "Expected at least 3D tensor (T, B, C)"
+        
+        # Make a copy to avoid modifying the original
+        result = tensor.clone()
+        
+        # Get shape info
+        time_dim, band_dim, channel_dim = 0, 1, 2
+        num_channels = tensor.shape[channel_dim]
+        
+        # Determine how many channels to mix
+        channels_to_mix = min(self.num_channels_to_mix, num_channels) if self.num_channels_to_mix > 0 else num_channels
+        
+        for band_idx in range(tensor.shape[band_dim]):
+            # Select channels to mix (randomly)
+            selected_channels = torch.randperm(num_channels)[:channels_to_mix]
+            
+            # Mix each selected channel with another random channel
+            for ch_idx in selected_channels:
+                # Pick another channel to mix with (different from current)
+                other_channels = [i for i in range(num_channels) if i != ch_idx]
+                mix_with = other_channels[torch.randint(len(other_channels), (1,)).item()]
+                
+                # Sample mixing ratio from specified range
+                alpha = torch.empty(1).uniform_(self.mix_ratio_range[0], self.mix_ratio_range[1]).item()
+                
+                # Create the mix: (1-alpha)*original + alpha*other
+                original_signal = tensor[:, band_idx, ch_idx]
+                other_signal = tensor[:, band_idx, mix_with]
+                
+                # Apply the mix
+                result[:, band_idx, ch_idx] = (1 - alpha) * original_signal + alpha * other_signal
+        
+        return result

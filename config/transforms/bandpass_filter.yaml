@@ -1,0 +1,32 @@
+# @package _global_
+defaults:
+  - log_spectrogram  # Inherit from base log_spectrogram config
+  - _self_  # Allow overriding with settings below
+
+# Define bandpass filter
+bandpass:
+  _target_: emg2qwerty.transforms.BandpassFilter
+  low_cut: 20.0
+  high_cut: 450.0
+  sample_rate: 2000.0
+  transition_width: 0.1
+
+# Override transforms to include bandpass
+transforms:
+  train:
+    - ${to_tensor}
+    - ${bandpass}  # Apply bandpass filtering before other transforms
+    - ${band_rotation}
+    - ${temporal_jitter}
+    - ${logspec}
+    - ${specaug}
+
+  val:
+    - ${to_tensor}
+    - ${bandpass}  # Apply bandpass filtering for validation too
+    - ${logspec}
+
+  test:
+    - ${to_tensor}
+    - ${bandpass}  # Apply bandpass filtering for inference
+    - ${logspec} 

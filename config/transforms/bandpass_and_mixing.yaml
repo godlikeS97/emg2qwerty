@@ -1,0 +1,40 @@
+# @package _global_
+defaults:
+  - log_spectrogram  # Inherit from base log_spectrogram config
+  - _self_  # Allow overriding with settings below
+
+# Define bandpass filter
+bandpass:
+  _target_: emg2qwerty.transforms.BandpassFilter
+  low_cut: 20.0
+  high_cut: 450.0
+  sample_rate: 2000.0
+  transition_width: 0.1
+
+# Define cross-channel mixing
+channel_mixing:
+  _target_: emg2qwerty.transforms.CrossChannelMixing
+  mix_ratio_range: [0.1, 0.3]
+  num_channels_to_mix: 8
+  seed: null
+
+# Override transforms to include both preprocessing steps
+transforms:
+  train:
+    - ${to_tensor}
+    - ${bandpass}  # First apply bandpass filtering
+    - ${channel_mixing}  # Then apply channel mixing
+    - ${band_rotation}
+    - ${temporal_jitter}
+    - ${logspec}
+    - ${specaug}
+
+  val:
+    - ${to_tensor}
+    - ${bandpass}  # Apply bandpass filtering for validation too
+    - ${logspec}
+
+  test:
+    - ${to_tensor}
+    - ${bandpass}  # Apply bandpass filtering for inference
+    - ${logspec} 

@@ -1,0 +1,29 @@
+# @package _global_
+defaults:
+  - log_spectrogram  # Inherit from base log_spectrogram config
+  - _self_  # Allow overriding with settings below
+
+# Define cross-channel mixing
+channel_mixing:
+  _target_: emg2qwerty.transforms.CrossChannelMixing
+  mix_ratio_range: [0.1, 0.3]
+  num_channels_to_mix: 8
+  seed: null
+
+# Override transforms to include cross-channel mixing
+transforms:
+  train:
+    - ${to_tensor}
+    - ${channel_mixing}  # Apply channel mixing before other transforms
+    - ${band_rotation}
+    - ${temporal_jitter}
+    - ${logspec}
+    - ${specaug}
+
+  val:
+    - ${to_tensor}
+    - ${logspec}  # No mixing for validation
+
+  test:
+    - ${to_tensor}
+    - ${logspec}  # No mixing for inference 
