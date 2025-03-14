@@ -155,9 +155,14 @@ class TDSConvCTCModule(pl.LightningModule):
         optimizer: DictConfig,
         lr_scheduler: DictConfig,
         decoder: DictConfig,
+        electrode_channels: int = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
+        
+        # Override the class constant if electrode_channels is provided
+        if electrode_channels is not None:
+            self.ELECTRODE_CHANNELS = electrode_channels
 
         num_features = self.NUM_BANDS * mlp_features[-1]
 

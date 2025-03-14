@@ -1,0 +1,13 @@
+# @package _global_
+module:
+  _target_: emg2qwerty.lightning.TDSConvCTCModule
+  in_features: 264  # freq * channels = (n_fft // 2 + 1) * 8 = 33 * 8 = 264
+  mlp_features: [384]
+  block_channels: [24, 24, 24, 24]
+  kernel_width: 32
+  electrode_channels: 8  # Override the default 16 channels
+
+datamodule:
+  _target_: emg2qwerty.lightning.WindowedEMGDataModule
+  window_length: 8000  # 4 sec windows for 2kHz EMG
+  padding: [1800, 200]  # 900ms past context, 100ms future context 
