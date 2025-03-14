@@ -1,0 +1,29 @@
+EMG2QWERTY Cross-Experiment Log - Fri Mar 14 02:19:52 CST 2025
+=======================================
+Total experiments to run: 3
+
+=====================================================
+Running experiment 1/3: lstm_ctc_temporal_scaling
+Start time: Fri Mar 14 02:19:52 CST 2025
+Command: python -m emg2qwerty.train           user="single_user"           model=lstm_ctc           transforms=temporal_scaling           trainer.max_epochs=50           trainer.accelerator=gpu           trainer.devices=1           batch_size=32           +callback=decoding_visualization                      +experiment.name=lstm_ctc_temporal_scaling           +experiment.output_dir=cross_experiment_results_RNN/lstm_ctc_temporal_scaling
+End time: Fri Mar 14 02:51:39 CST 2025
+Status: SUCCESS
+
+=====================================================
+Running experiment 2/3: lstm_ctc_bandpass_filter
+Start time: Fri Mar 14 02:51:44 CST 2025
+Command: python -m emg2qwerty.train           user="single_user"           model=lstm_ctc           transforms=bandpass_filter           trainer.max_epochs=50           trainer.accelerator=gpu           trainer.devices=1           batch_size=32           +callback=decoding_visualization                      +experiment.name=lstm_ctc_bandpass_filter           +experiment.output_dir=cross_experiment_results_RNN/lstm_ctc_bandpass_filter
+End time: Fri Mar 14 03:23:58 CST 2025
+Status: SUCCESS
+
+=====================================================
+Running experiment 3/3: lstm_ctc_cross_channel_mixing
+Start time: Fri Mar 14 03:24:03 CST 2025
+Command: python -m emg2qwerty.train           user="single_user"           model=lstm_ctc           transforms=cross_channel_mixing           trainer.max_epochs=50           trainer.accelerator=gpu           trainer.devices=1           batch_size=32           +callback=decoding_visualization                      +experiment.name=lstm_ctc_cross_channel_mixing           +experiment.output_dir=cross_experiment_results_RNN/lstm_ctc_cross_channel_mixing
+End time: Fri Mar 14 03:52:51 CST 2025
+Status: SUCCESS
+
+=====================================================
+All experiments completed!
+Results are stored in cross_experiment_results_RNN/
+Check cross_experiment_results_RNN/summary.txt for a quick overview of all experiments.

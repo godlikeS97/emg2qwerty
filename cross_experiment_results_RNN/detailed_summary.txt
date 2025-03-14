@@ -1,0 +1,27 @@
+EMG2QWERTY Cross-Experiment Detailed Summary
+===========================================
+
+Experiment: lstm_ctc_bandpass_filter
+  Model: lstm
+  Transform: ctc_bandpass_filter
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 35.44413375854492
+
+Experiment: lstm_ctc_cross_channel_mixing
+  Model: lstm
+  Transform: ctc_cross_channel_mixing
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 19.926517486572266
+
+Experiment: lstm_ctc_temporal_scaling
+  Model: lstm
+  Transform: ctc_temporal_scaling
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 23.77350425720215
+
