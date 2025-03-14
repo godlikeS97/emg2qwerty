@@ -481,3 +481,71 @@ class CrossChannelMixing:
                 result[:, band_idx, ch_idx] = (1 - alpha) * original_signal + alpha * other_signal
         
         return result
+
+
+@dataclass
+class ChannelSelector:
+    """Selects a subset of channels from the electrode data.
+    
+    This transform is designed to select a specific number of channels from
+    the original electrode data, allowing experiments with varying numbers
+    of electrode channels.
+    
+    The input must be of shape (T, B, C) where:
+      - T is time dimension
+      - B is band dimension (left/right hand)
+      - C is channel dimension (number of electrodes)
+    
+    Args:
+        num_channels (int): Number of channels to select.
+            Must be less than or equal to the original number of channels.
+        selection_method (str): Method to use for selecting channels.
+            - 'first': Select the first N channels
+            - 'uniform': Select N channels uniformly spaced across the original channels
+            - 'random': Randomly select N channels (fixed seed for reproducibility)
+        seed (int): Random seed for reproducibility when using random selection.
+    """
+    
+    num_channels: int = 16  # Default is to keep all channels
+    selection_method: str = 'first'  # 'first', 'uniform', or 'random'
+    seed: int = 42  # Fixed seed for reproducibility
+    
+    def __post_init__(self) -> None:
+        assert self.num_channels > 0, "Number of channels must be positive"
+        assert self.selection_method in ['first', 'uniform', 'random'], \
+            "Selection method must be 'first', 'uniform', or 'random'"
+            
+        if self.seed is not None:
+            np.random.seed(self.seed)
+            
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        # Expect (Time, Band, Channel) format
+        assert tensor.ndim >= 3, "Expected at least 3D tensor (T, B, C)"
+        
+        # Get shape info
+        time_dim, band_dim, channel_dim = 0, 1, 2
+        orig_channels = tensor.shape[channel_dim]
+        
+        # If num_channels is already equal to or larger than the original number,
+        # return the original tensor
+        if self.num_channels >= orig_channels:
+            return tensor
+        
+        # Determine which channels to select
+        if self.selection_method == 'first':
+            # Select the first N channels
+            selected_indices = list(range(self.num_channels))
+        elif self.selection_method == 'uniform':
+            # Select N channels uniformly spaced
+            selected_indices = np.linspace(0, orig_channels - 1, self.num_channels, dtype=int).tolist()
+        elif self.selection_method == 'random':
+            # Randomly select N channels (with fixed seed for reproducibility)
+            selected_indices = np.random.choice(orig_channels, self.num_channels, replace=False).tolist()
+        
+        # Create a new tensor with only the selected channels
+        selected_tensor = tensor.clone()
+        
+        # Select only the relevant channels
+        selected_tensor = selected_tensor[:, :, selected_indices]
+        
+        return selected_tensor
