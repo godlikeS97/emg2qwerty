@@ -1,0 +1,8 @@
+EMG2QWERTY Cross-Experiment Log - Fri Mar 14 01:57:33 CST 2025
+=======================================
+Total experiments to run: 6
+
+=====================================================
+Running experiment 1/6: tds_conv_ctc_temporal_scaling
+Start time: Fri Mar 14 01:57:33 CST 2025
+Command: python -m emg2qwerty.train           user="single_user"           model=tds_conv_ctc           transforms=temporal_scaling           trainer.max_epochs=200           trainer.accelerator=gpu           trainer.devices=1           batch_size=256           +callback=decoding_visualization                      +experiment.name=tds_conv_ctc_temporal_scaling           +experiment.output_dir=cross_experiment_results/tds_conv_ctc_temporal_scaling

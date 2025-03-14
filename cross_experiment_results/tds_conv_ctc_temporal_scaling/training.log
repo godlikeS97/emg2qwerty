@@ -1,0 +1,560 @@
+[2025-03-14 01:57:38,237][__main__][INFO] - 
+Config:
+user: single_user
+dataset:
+  train:
+  - user: 89335547
+    session: 2021-06-03-1622765527-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-02-1622681518-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-04-1622863166-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-22-1627003020-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-21-1626916256-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-22-1627004019-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-05-1622885888-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-02-1622679967-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-03-1622764398-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-21-1626917264-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-05-1622889105-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-03-1622766673-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-04-1622861066-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-22-1627001995-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-06-05-1622884635-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  - user: 89335547
+    session: 2021-07-21-1626915176-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  val:
+  - user: 89335547
+    session: 2021-06-04-1622862148-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  test:
+  - user: 89335547
+    session: 2021-06-02-1622682789-keystrokes-dca-study@1-0efbe614-9ae6-4131-9192-4398359b4f5f
+  root: ${hydra:runtime.cwd}/data
+to_tensor:
+  _target_: emg2qwerty.transforms.ToTensor
+  fields:
+  - emg_left
+  - emg_right
+temporal_scaling:
+  _target_: emg2qwerty.transforms.TemporalScaling
+  min_scale: 0.85
+  max_scale: 1.15
+  time_dim: 0
+band_rotation:
+  _target_: emg2qwerty.transforms.ForEach
+  transform:
+    _target_: emg2qwerty.transforms.RandomBandRotation
+    offsets:
+    - -1
+    - 0
+    - 1
+temporal_jitter:
+  _target_: emg2qwerty.transforms.TemporalAlignmentJitter
+  max_offset: 150
+logspec:
+  _target_: emg2qwerty.transforms.LogSpectrogram
+  n_fft: 64
+  hop_length: 16
+specaug:
+  _target_: emg2qwerty.transforms.SpecAugment
+  n_time_masks: 4
+  time_mask_param: 30
+  n_freq_masks: 3
+  freq_mask_param: 5
+transforms:
+  train:
+  - ${to_tensor}
+  - ${temporal_scaling}
+  - ${band_rotation}
+  - ${temporal_jitter}
+  - ${logspec}
+  - ${specaug}
+  val:
+  - ${to_tensor}
+  - ${logspec}
+  test: ${transforms.val}
+module:
+  _target_: emg2qwerty.lightning.TDSConvCTCModule
+  in_features: 528
+  mlp_features:
+  - 384
+  block_channels:
+  - 24
+  - 24
+  - 24
+  - 24
+  kernel_width: 32
+datamodule:
+  _target_: emg2qwerty.lightning.WindowedEMGDataModule
+  window_length: 8000
+  padding:
+  - 1800
+  - 200
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 0.001
+lr_scheduler:
+  scheduler:
+    _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+    warmup_epochs: 10
+    max_epochs: ${trainer.max_epochs}
+    warmup_start_lr: 1.0e-08
+    eta_min: 1.0e-06
+  interval: epoch
+decoder:
+  _target_: emg2qwerty.decoder.CTCGreedyDecoder
+  blank_threshold: 0.5
+seed: 1501
+batch_size: 256
+num_workers: 4
+train: true
+checkpoint: null
+monitor_metric: val/CER
+monitor_mode: min
+trainer:
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  max_epochs: 200
+  default_root_dir: ${hydra:runtime.output_dir}
+callbacks:
+- _target_: pytorch_lightning.callbacks.LearningRateMonitor
+- _target_: pytorch_lightning.callbacks.ModelCheckpoint
+  dirpath: ${hydra:runtime.output_dir}/checkpoints
+  monitor: ${monitor_metric}
+  mode: ${monitor_mode}
+  save_last: true
+  verbose: true
+- _target_: emg2qwerty.callbacks.DecodingVisualizationCallback
+  num_samples: 5
+  log_dir: ${hydra:runtime.output_dir}/decoding_visualization
+experiment:
+  name: tds_conv_ctc_temporal_scaling
+  output_dir: cross_experiment_results/tds_conv_ctc_temporal_scaling
+
+Global seed set to 1501
+[2025-03-14 01:57:38,241][__main__][INFO] - Instantiating LightningModule {'_target_': 'emg2qwerty.lightning.TDSConvCTCModule', 'in_features': 528, 'mlp_features': [384], 'block_channels': [24, 24, 24, 24], 'kernel_width': 32}
+[2025-03-14 01:57:38,374][__main__][INFO] - Instantiating LightningDataModule {'_target_': 'emg2qwerty.lightning.WindowedEMGDataModule', 'window_length': 8000, 'padding': [1800, 200]}
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+IPU available: False, using: 0 IPUs
+HPU available: False, using: 0 HPUs
+Missing logger folder: /root/autodl-tmp/emg2qwerty/logs/2025-03-14/01-57-38/lightning_logs
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pl_bolts/__init__.py:11: FutureWarning: In the future `np.object` will be defined as the corresponding NumPy scalar.
+  if not hasattr(numpy, tp_name):
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pl_bolts/__init__.py:11: FutureWarning: In the future `np.bool` will be defined as the corresponding NumPy scalar.
+  if not hasattr(numpy, tp_name):
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pl_bolts/models/self_supervised/amdim/amdim_module.py:34: UnderReviewWarning: The feature generate_power_seq is currently marked under review. The compatibility with other Lightning projects is not guaranteed and API may change at any time. The API and functionality may change without warning in future releases. More details: https://lightning-bolts.readthedocs.io/en/latest/stability.html
+  "lr_options": generate_power_seq(LEARNING_RATE_CIFAR, 11),
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pl_bolts/models/self_supervised/amdim/amdim_module.py:92: UnderReviewWarning: The feature FeatureMapContrastiveTask is currently marked under review. The compatibility with other Lightning projects is not guaranteed and API may change at any time. The API and functionality may change without warning in future releases. More details: https://lightning-bolts.readthedocs.io/en/latest/stability.html
+  contrastive_task: Union[FeatureMapContrastiveTask] = FeatureMapContrastiveTask("01, 02, 11"),
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pl_bolts/losses/self_supervised_learning.py:228: UnderReviewWarning: The feature AmdimNCELoss is currently marked under review. The compatibility with other Lightning projects is not guaranteed and API may change at any time. The API and functionality may change without warning in future releases. More details: https://lightning-bolts.readthedocs.io/en/latest/stability.html
+  self.nce_loss = AmdimNCELoss(tclip)
+/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/hydra/_internal/instantiate/_instantiate2.py:92: UnderReviewWarning: The feature LinearWarmupCosineAnnealingLR is currently marked under review. The compatibility with other Lightning projects is not guaranteed and API may change at any time. The API and functionality may change without warning in future releases. More details: https://lightning-bolts.readthedocs.io/en/latest/stability.html
+  return _target_(*args, **kwargs)
+
+  | Name     | Type       | Params
+----------------------------------------
+0 | model    | Sequential | 5.3 M 
+1 | ctc_loss | CTCLoss    | 0     
+2 | metrics  | ModuleDict | 0     
+----------------------------------------
+5.3 M     Trainable params
+0         Non-trainable params
+5.3 M     Total params
+21.173    Total estimated model params size (MB)
+Sanity Checking: 0it [00:00, ?it/s]Sanity Checking:   0%|          | 0/1 [00:00<?, ?it/s]Sanity Checking DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s]/root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/torch/nn/modules/conv.py:456: UserWarning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (Triggered internally at /opt/conda/conda-bld/pytorch_1712608935911/work/aten/src/ATen/native/cudnn/Conv_v8.cpp:919.)
+  return F.conv2d(input, weight, bias, self.stride,
+Sanity Checking DataLoader 0: 100%|██████████| 1/1 [00:01<00:00,  1.33s/it]
+VAL EPOCH 0 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+F#&2[U&U2#⌫2FpF#U#[2&2F #U2#F&[&#&NF#UoU⇧#2⇧&[N[# F#&#2[&#g[g&F2N#2#2#[g2\ #F#[#UN#p2[#&2UF#2&p[.&p2pg#&2#[)[&[2#p#2p2 &0p2#2#0[ "&2p&U&#2&2# 2N2 e&2&#U[eU.g2LU&p2#g#[V.p&U2U&U V2VoUN2&g gUJ g2#2g2& &gNg2F2gpUgUN #2#12&N⇧4⇧ J#U #N2#0 ⇧[⇧[pN #N[2⇧&g2#2p2 F[#U#p~#X2#&#&pd#&#F#U#U#F |                                          | 0.00%
+#2#U#U#U#&c#pg#2#2V2#&⇧&#U#c⇧#coa#U#⇧#oU#o2#c⇧#V#⇧#o#U#U#2#⇧#p#2#N#N#2#c#U#⇧#2#⇧#⇧#UVUc2# | the quick brown fox jumps                | 326.92%
+#N#V#⇧&#c#&c#V0#c#V2cV#⇧g#g2#2#⇧c⇧#g#cgcVc⇧#a0c⇧#Nc#2#2#⇧#2g#&#2#2#2#2#2#(#U#&c# | over a lazy dog⏎spiritual                | 312.00%
+#2#⇧#c0o#UV⇧N#V#o&⇧#V2#⇧#⇧#U#⇧cV2#⇧#⇧2Vc#⇧2#VU⇧# #g#N⇧#2#⇧#⇧#N#&#N#U#e#U#U#e#&g#&V#&#N#2U#2)V2c0&U#U2#eVc#U#g#N#U#2# |  valium committees c                     | 560.00%
+#2#tF#L#2#2#⇧#U#2#2#t#F#⇧#2#2#&#F#2#U&oV#3#U#U#⇧# | ontest⏎cattle nails c                    | 223.81%
+--------------------------------------------------------------------------------
+                                                                           /root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/pytorch_lightning/trainer/trainer.py:1595: PossibleUserWarning: The number of training batches (15) is smaller than the logging interval Trainer(log_every_n_steps=50). Set a lower value for log_every_n_steps if you want to see logs for the training epoch.
+  rank_zero_warn(
+Training: 0it [00:00, ?it/s]Training:   0%|          | 0/16 [00:00<?, ?it/s]Epoch 0:   0%|          | 0/16 [00:00<?, ?it/s] /root/miniconda3/envs/emg2qwerty/lib/python3.10/site-packages/torch/autograd/graph.py:744: UserWarning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (Triggered internally at /opt/conda/conda-bld/pytorch_1712608935911/work/aten/src/ATen/native/cudnn/Conv_v8.cpp:919.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+Epoch 0:   6%|▋         | 1/16 [00:11<02:57, 11.86s/it]Epoch 0:   6%|▋         | 1/16 [00:11<02:57, 11.87s/it, loss=119, v_num=0]Epoch 0:  12%|█▎        | 2/16 [00:13<01:33,  6.65s/it, loss=119, v_num=0]Epoch 0:  12%|█▎        | 2/16 [00:13<01:35,  6.85s/it, loss=117, v_num=0]Epoch 0:  19%|█▉        | 3/16 [00:15<01:05,  5.03s/it, loss=117, v_num=0]Epoch 0:  19%|█▉        | 3/16 [00:15<01:07,  5.16s/it, loss=116, v_num=0]Epoch 0:  25%|██▌       | 4/16 [00:16<00:49,  4.15s/it, loss=116, v_num=0]Epoch 0:  25%|██▌       | 4/16 [00:17<00:51,  4.26s/it, loss=121, v_num=0]Epoch 0:  31%|███▏      | 5/16 [00:18<00:40,  3.64s/it, loss=121, v_num=0]Epoch 0:  31%|███▏      | 5/16 [00:18<00:40,  3.72s/it, loss=119, v_num=0]Epoch 0:  38%|███▊      | 6/16 [00:19<00:32,  3.29s/it, loss=119, v_num=0]Epoch 0:  38%|███▊      | 6/16 [00:20<00:33,  3.36s/it, loss=120, v_num=0]Epoch 0:  44%|████▍     | 7/16 [00:21<00:27,  3.04s/it, loss=120, v_num=0]Epoch 0:  44%|████▍     | 7/16 [00:21<00:27,  3.10s/it, loss=119, v_num=0]Epoch 0:  50%|█████     | 8/16 [00:22<00:22,  2.86s/it, loss=119, v_num=0]Epoch 0:  50%|█████     | 8/16 [00:23<00:23,  2.91s/it, loss=119, v_num=0]Epoch 0:  56%|█████▋    | 9/16 [00:24<00:18,  2.71s/it, loss=119, v_num=0]Epoch 0:  56%|█████▋    | 9/16 [00:24<00:19,  2.76s/it, loss=120, v_num=0]Epoch 0:  62%|██████▎   | 10/16 [00:25<00:15,  2.60s/it, loss=120, v_num=0]Epoch 0:  62%|██████▎   | 10/16 [00:26<00:15,  2.64s/it, loss=118, v_num=0]Epoch 0:  69%|██████▉   | 11/16 [00:27<00:12,  2.51s/it, loss=118, v_num=0]Epoch 0:  69%|██████▉   | 11/16 [00:27<00:12,  2.54s/it, loss=121, v_num=0]Epoch 0:  75%|███████▌  | 12/16 [00:29<00:09,  2.43s/it, loss=121, v_num=0]Epoch 0:  75%|███████▌  | 12/16 [00:29<00:09,  2.46s/it, loss=121, v_num=0]Epoch 0:  81%|████████▏ | 13/16 [00:30<00:07,  2.36s/it, loss=121, v_num=0]Epoch 0:  81%|████████▏ | 13/16 [00:31<00:07,  2.39s/it, loss=121, v_num=0]Epoch 0:  88%|████████▊ | 14/16 [00:32<00:04,  2.31s/it, loss=121, v_num=0]Epoch 0:  88%|████████▊ | 14/16 [00:32<00:04,  2.34s/it, loss=121, v_num=0]Epoch 0:  94%|█████████▍| 15/16 [00:33<00:02,  2.26s/it, loss=121, v_num=0]Epoch 0:  94%|█████████▍| 15/16 [00:34<00:02,  2.28s/it, loss=121, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.20it/s][AEpoch 0: 100%|██████████| 16/16 [00:39<00:00,  2.46s/it, loss=121, v_num=0]
+VAL EPOCH 0 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+F#&[U&U2#⌫oF#U#[ &2F [U2#F&[&#&gFo#HUF#2 ⇧&[&[# F &F2[&#g[g&F#2~p6#[g2& XF#[#U,2\g [&UF#2& g[.&Y2 g#g2#[) g&[2[p#2[2 &0pg2#F#26#N[ "&2aF U&#&U # 2N4 e&F[1#U[gU.g&L &F&2#g[V.p&U# &2VoU#2[&g gUF gF#2g2 &g2F2gpaUgU #UgN&4& FJ#U #N2#0#g [pN #2[&2&g2#2|2 F[#U#gp~F&\o&#&p#F#U#oU#F |                                          | 0.00%
+#2#2#2#U#U#&c#pg#&#U#2&e#&#gF#Vc2&#Voa#U#g#oU#o2#c⇧#aV#2#oU#U#U#2#2#p#2#F#N#N#2#c#U#⇧#2#⇧#UVUNc2# | the quick brown fox jumps                | 353.85%
+#N#&#c#&c#V10#c#V2#cYcV#⇧g#g#2#⇧g⇧#2g#cgcVcU⇧#a#c#Nc#2#2#⇧#2#2g#&#2#2#2#9# U#&F# | over a lazy dog⏎spiritual                | 312.00%
+#2#⇧#&0o#UV#N#V#o1⇧#V#2#⇧#⇧#U#⇧#co2#⇧#⇧2V#⇧2#VUg# #g#2⇧#2#2⇧F#2#2#&#U#U#F#&g#&V&#&#gN#2U#)V2c0&#U2#eVc#g#U#F#⌫# |  valium committees c                     | 535.00%
+#2#2#2#F#L#2#2#2#a#Y#U2#U#t#F#⇧#2#2#&#F#2#&#U&oV#3#U#g# | ontest⏎cattle nails c                    | 252.38%
+--------------------------------------------------------------------------------
+Epoch 0: 100%|██████████| 16/16 [00:39<00:00,  2.46s/it, loss=121, v_num=0]
+                                                                      [A
+TRAIN EPOCH 0 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+#2[#g#V#U#U#2#g#2&#g#F#2# #2# w#g#U2#2#N#2#2[2#&[ 2# F2#2#2g#U# F#2#[#g#2#2#U# #2A k"#g#"# g2g#2g#g#g#g#2 &#g #2#2#g#c#2g#g#g2#2#2#2#F#g #g2#2Ng #g#gog## g #2F2 #g#g#2 | r⌫⌫⌫⌫s written popular book              | 600.00%
+VU2&F )VF&o'&)g 2Fg#2g1geg2gegY?2e#F#Ng2 F#eg#AU#[#&#wF#F#pF2#2o2#U#2#2#o2g#2#2#F#2#F#U#&#g#F2#2#2#U#F#F# #F#F#2#U#N#U#F#2#F# #U#&cVgK"K&K&K&KRbKRKbRnbnRbRnRnRnR | ⏎to children and mothers                 | 650.00%
+ #F#F F#F#F#F#2#F# #,(2# 2o oN#\2 #&#&N0 F# # gF2[ogFg # g #VoU # #g2F2g & gbF&2 2 F [) # F#U[ # 6o # g9[w#o# oF#2" # # #[#&#g&N e eg&Vwo gF#~ # #gag2#F 2 #[6#2F gFg#UF#g# F#6#V2 2g#F#2#at#g#FtF#2F#F# F#F#o#oF#2#&2&#&V#2#U&w#&V#o#[2#⇧V#o#egVO#2VgVgogVUge0OeV &goeV#2g#2Vcg#g2g⇧#e2 gp g-[#9# #2#F#F#&"L"K)b&"qKbK | ccommodation⏎                            | 2353.85%
+ V&2g#F#2g#g2g2#p#2&2U2~ pga#[#[#F# 929"2#F#[ g#2[a#&#\F#& U\ #\a#H2p2#2&F[d#oF#2#Hp&H,#⌫[&[#&#a#2&#i#2##2#2 &# #F#U#U[U#UHg#g F#2#2# #F#F#2#2#2#2#2#F#2#[FgU#F# g6g#g#2#g#o#2#2#g2#g2g#2#U# g#g#2#2#F#2#2#2#2#2#U#2#2g2#-[&#g# g2#U#g#H#U#[# | ⏎affecting rules pr                      | 1221.05%
+oYo#oFN#6 #F6pF#Nog#g⇧g#Fg# #g#-NwFg2#F 2#2NUF#w# #U#N#2#2#2F#F#2g#g#g&2F#o#U#&#o#oN#&#⇧U2&#UV#U#&#o#⇧#2#cN2#2[#N#VoVN9#⇧co2#o#go#o#o2o#⇧#⇧#c#&⇧#&#&#g2#c#g#⇧# 2#2ogeg2eg2g#2#a&#2#&c⇧#2#2#⇧#Ne#Uo#2#e#o#V#g#o#&F#⇧oc#U2#⇧#c#cVg"L"L"a)q"Kqb$bqbn |                                          | 0.00%
+--------------------------------------------------------------------------------
+Epoch 0: 100%|██████████| 16/16 [00:39<00:00,  2.46s/it, loss=121, v_num=0]Epoch 0, global step 15: 'val/CER' reached 707.26630 (best 707.26630), saving model to '/root/autodl-tmp/emg2qwerty/logs/2025-03-14/01-57-38/checkpoints/epoch=0-step=15.ckpt' as top 1
+Epoch 0:   0%|          | 0/16 [00:00<?, ?it/s, loss=121, v_num=0]         Epoch 1:   0%|          | 0/16 [00:00<?, ?it/s, loss=121, v_num=0]Epoch 1:   6%|▋         | 1/16 [00:07<01:57,  7.83s/it, loss=121, v_num=0]Epoch 1:   6%|▋         | 1/16 [00:08<02:03,  8.24s/it, loss=121, v_num=0]Epoch 1:  12%|█▎        | 2/16 [00:09<01:04,  4.59s/it, loss=121, v_num=0]Epoch 1:  12%|█▎        | 2/16 [00:09<01:07,  4.80s/it, loss=118, v_num=0]Epoch 1:  19%|█▉        | 3/16 [00:10<00:45,  3.48s/it, loss=118, v_num=0]Epoch 1:  19%|█▉        | 3/16 [00:10<00:47,  3.62s/it, loss=113, v_num=0]Epoch 1:  25%|██▌       | 4/16 [00:11<00:35,  2.93s/it, loss=113, v_num=0]Epoch 1:  25%|██▌       | 4/16 [00:12<00:36,  3.03s/it, loss=109, v_num=0]Epoch 1:  31%|███▏      | 5/16 [00:12<00:28,  2.59s/it, loss=109, v_num=0]Epoch 1:  31%|███▏      | 5/16 [00:13<00:29,  2.67s/it, loss=106, v_num=0]Epoch 1:  38%|███▊      | 6/16 [00:14<00:23,  2.37s/it, loss=106, v_num=0]Epoch 1:  38%|███▊      | 6/16 [00:14<00:24,  2.44s/it, loss=101, v_num=0]Epoch 1:  44%|████▍     | 7/16 [00:15<00:19,  2.21s/it, loss=101, v_num=0]Epoch 1:  44%|████▍     | 7/16 [00:15<00:20,  2.27s/it, loss=96, v_num=0] Epoch 1:  50%|█████     | 8/16 [00:16<00:16,  2.09s/it, loss=96, v_num=0]Epoch 1:  50%|█████     | 8/16 [00:17<00:17,  2.14s/it, loss=91.6, v_num=0]Epoch 1:  56%|█████▋    | 9/16 [00:18<00:14,  2.09s/it, loss=91.6, v_num=0]Epoch 1:  56%|█████▋    | 9/16 [00:19<00:14,  2.13s/it, loss=85.6, v_num=0]Epoch 1:  62%|██████▎   | 10/16 [00:20<00:12,  2.01s/it, loss=85.6, v_num=0]Epoch 1:  62%|██████▎   | 10/16 [00:20<00:12,  2.05s/it, loss=81.1, v_num=0]Epoch 1:  69%|██████▉   | 11/16 [00:21<00:09,  1.96s/it, loss=81.1, v_num=0]Epoch 1:  69%|██████▉   | 11/16 [00:21<00:09,  1.99s/it, loss=76, v_num=0]  Epoch 1:  75%|███████▌  | 12/16 [00:22<00:07,  1.90s/it, loss=76, v_num=0]Epoch 1:  75%|███████▌  | 12/16 [00:23<00:07,  1.94s/it, loss=71.5, v_num=0]Epoch 1:  81%|████████▏ | 13/16 [00:24<00:05,  1.86s/it, loss=71.5, v_num=0]Epoch 1:  81%|████████▏ | 13/16 [00:24<00:05,  1.89s/it, loss=66, v_num=0]  Epoch 1:  88%|████████▊ | 14/16 [00:25<00:03,  1.83s/it, loss=66, v_num=0]Epoch 1:  88%|████████▊ | 14/16 [00:25<00:03,  1.86s/it, loss=60.3, v_num=0]Epoch 1:  94%|█████████▍| 15/16 [00:26<00:01,  1.79s/it, loss=60.3, v_num=0]Epoch 1:  94%|█████████▍| 15/16 [00:27<00:01,  1.81s/it, loss=55.2, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.50it/s][AEpoch 1: 100%|██████████| 16/16 [00:32<00:00,  2.00s/it, loss=55.2, v_num=0]
+VAL EPOCH 1 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 1: 100%|██████████| 16/16 [00:32<00:00,  2.00s/it, loss=55.2, v_num=0]
+                                                                      [A
+TRAIN EPOCH 1 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+#&#29a2#&2&#w#F#g#2#g# #\&#UF#\[#F[ #wo#U&#al[F&2#po[#[w# #Up[#e# #p#p# g #o&U#&U & #& #g&#2#g#F2g#g#&#9#&#U#F#FU# &# #⌫#U#2~d# #V#Uw#go#g# 2#2a#og&#g#gU#&#g#g#F[ #g#F# g&[#o#a#wV#g g#4g #C[#gp#F |a\#w#F#pC&U#\9R | ue deutschland mer                       | 1150.00%
+g2#2g2g#2gpF &gw&p(#6 #\#\F[p#[#[# R9#a&RFgF#2#2[F#F#U#2p&FUF#[9#2#\#F#g⌫g U#FtF2⌫#U#F,FU~F#[2[e[#og#[#g#g #[# [ g[#g2 Fp#Fa# [ g#F U'#[g2o#gV eY# #e2#2e#g2g#[g2gV2e#2e#2[g # V ag#g#V2Vge g gUYg g2g2geg#2 Vea VYe2ea2#Vg2VgVag#g eY#eYeV2#Fg2g2g#~ "gA2U&g#Fa#[&[g[w[a F# #op2[g[g[#UFp&Fg#geF #g2g gU&2 e# a#e#Ya2#2#[#U#F[# gLk"L" &K'K | retu⌫e⌫⌫ut                               | 3290.00%
+#2#2#F#&#N2#2 & # 2 2 #g# g [F#&g #N[ #U#Fg#[g#[#[# g#2# #U2#2# #2#2#F# #[#g#~#a F # #F # #2[F#a#g& #&#N# #F#"V"[#U#g[g#gF#2#U#~#2#U#2#~ # #2#2#[F#o#g#2# 2V go#V# V #F& #g geog#o#VegNg 2#ag | tings can last well⏎                     | 910.00%
+#F#0#V#2&2F #g#F#2#2g2#g#g# #2#g2#Fg#o#2#&F #2#2#0#F#2#F#F# #&F#g#g&#2#g#Fg[#g#g)V)#g2#o#&#go#F\2#F2F#g# 2#g2~6)g&g& 2# #g#& "\#[F#F2#g#a|#&gw&#ga#2 &#g#F#2#2#&#g#2#2# | d of a switch⏎and is move                | 644.00%
+F#U#2 # #F#F#2#⌫#U#&#2~#F#o#A#F#U#&2#wgU#&#p#&V#V#U&#g&#w0F#⇧ge2 #&2#2#g#U#Ut#g.#U#⇧#wN#&V#A&#U#wV⇧1F[ V#⇧#1c#V#21#&#⇧#4&#⌫2#2a &6#HoVoVU&V&UVN&#&[&P&V⇧e⇧&g&1#21 [gV4V &# 2& #~&#2#2#U#2&c&⇧⌫#A#V#2&2 #[#|#&p#X#&2F#F#2#&#F&#U&#2#U#U#2# 2#2&#2#⌫F#~2&#~#o#KRnRnR | discussio ⌫n capt                        | 1482.35%
+--------------------------------------------------------------------------------
+Epoch 1: 100%|██████████| 16/16 [00:32<00:00,  2.00s/it, loss=55.2, v_num=0]Epoch 1, global step 30: 'val/CER' reached 100.00000 (best 100.00000), saving model to '/root/autodl-tmp/emg2qwerty/logs/2025-03-14/01-57-38/checkpoints/epoch=1-step=30.ckpt' as top 1
+Epoch 1:   0%|          | 0/16 [00:00<?, ?it/s, loss=55.2, v_num=0]         Epoch 2:   0%|          | 0/16 [00:00<?, ?it/s, loss=55.2, v_num=0]Epoch 2:   6%|▋         | 1/16 [00:07<01:52,  7.50s/it, loss=55.2, v_num=0]Epoch 2:   6%|▋         | 1/16 [00:07<01:58,  7.91s/it, loss=48.4, v_num=0]Epoch 2:  12%|█▎        | 2/16 [00:08<01:01,  4.43s/it, loss=48.4, v_num=0]Epoch 2:  12%|█▎        | 2/16 [00:09<01:04,  4.63s/it, loss=42.7, v_num=0]Epoch 2:  19%|█▉        | 3/16 [00:10<00:44,  3.39s/it, loss=42.7, v_num=0]Epoch 2:  19%|█▉        | 3/16 [00:10<00:45,  3.52s/it, loss=36.7, v_num=0]Epoch 2:  25%|██▌       | 4/16 [00:11<00:34,  2.85s/it, loss=36.7, v_num=0]Epoch 2:  25%|██▌       | 4/16 [00:11<00:35,  2.95s/it, loss=31.4, v_num=0]Epoch 2:  31%|███▏      | 5/16 [00:12<00:28,  2.59s/it, loss=31.4, v_num=0]Epoch 2:  31%|███▏      | 5/16 [00:13<00:29,  2.67s/it, loss=25.5, v_num=0]Epoch 2:  38%|███▊      | 6/16 [00:14<00:23,  2.37s/it, loss=25.5, v_num=0]Epoch 2:  38%|███▊      | 6/16 [00:14<00:24,  2.44s/it, loss=19.4, v_num=0]Epoch 2:  44%|████▍     | 7/16 [00:15<00:19,  2.21s/it, loss=19.4, v_num=0]Epoch 2:  44%|████▍     | 7/16 [00:15<00:20,  2.27s/it, loss=16.7, v_num=0]Epoch 2:  50%|█████     | 8/16 [00:16<00:16,  2.09s/it, loss=16.7, v_num=0]Epoch 2:  50%|█████     | 8/16 [00:17<00:17,  2.14s/it, loss=15.2, v_num=0]Epoch 2:  56%|█████▋    | 9/16 [00:18<00:14,  2.04s/it, loss=15.2, v_num=0]Epoch 2:  56%|█████▋    | 9/16 [00:18<00:14,  2.08s/it, loss=14, v_num=0]  Epoch 2:  62%|██████▎   | 10/16 [00:19<00:11,  1.95s/it, loss=14, v_num=0]Epoch 2:  62%|██████▎   | 10/16 [00:19<00:11,  1.99s/it, loss=12.1, v_num=0]Epoch 2:  69%|██████▉   | 11/16 [00:20<00:09,  1.88s/it, loss=12.1, v_num=0]Epoch 2:  69%|██████▉   | 11/16 [00:21<00:09,  1.92s/it, loss=11.7, v_num=0]Epoch 2:  75%|███████▌  | 12/16 [00:21<00:07,  1.82s/it, loss=11.7, v_num=0]Epoch 2:  75%|███████▌  | 12/16 [00:22<00:07,  1.86s/it, loss=10.9, v_num=0]Epoch 2:  81%|████████▏ | 13/16 [00:23<00:05,  1.84s/it, loss=10.9, v_num=0]Epoch 2:  81%|████████▏ | 13/16 [00:24<00:05,  1.87s/it, loss=9.89, v_num=0]Epoch 2:  88%|████████▊ | 14/16 [00:25<00:03,  1.79s/it, loss=9.89, v_num=0]Epoch 2:  88%|████████▊ | 14/16 [00:25<00:03,  1.82s/it, loss=9.43, v_num=0]Epoch 2:  94%|█████████▍| 15/16 [00:26<00:01,  1.75s/it, loss=9.43, v_num=0]Epoch 2:  94%|█████████▍| 15/16 [00:26<00:01,  1.78s/it, loss=8.47, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.53it/s][AEpoch 2: 100%|██████████| 16/16 [00:30<00:00,  1.93s/it, loss=8.47, v_num=0]
+VAL EPOCH 2 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 2: 100%|██████████| 16/16 [00:30<00:00,  1.93s/it, loss=8.47, v_num=0]
+                                                                      [A
+TRAIN EPOCH 2 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |  of a switch⏎and is move                 | 100.00%
+                                         | ng disclosure⏎                           | 100.00%
+                                         | aries describi                           | 100.00%
+                                         | er newer⏎ones mercha                     | 100.00%
+                                         | rex⌫covered mer                          | 100.00%
+--------------------------------------------------------------------------------
+Epoch 2: 100%|██████████| 16/16 [00:30<00:00,  1.93s/it, loss=8.47, v_num=0]Epoch 2, global step 45: 'val/CER' was not in top 1
+Epoch 2:   0%|          | 0/16 [00:00<?, ?it/s, loss=8.47, v_num=0]         Epoch 3:   0%|          | 0/16 [00:00<?, ?it/s, loss=8.47, v_num=0]Epoch 3:   6%|▋         | 1/16 [00:07<01:59,  7.94s/it, loss=8.47, v_num=0]Epoch 3:   6%|▋         | 1/16 [00:08<02:05,  8.34s/it, loss=7.69, v_num=0]Epoch 3:  12%|█▎        | 2/16 [00:09<01:05,  4.65s/it, loss=7.69, v_num=0]Epoch 3:  12%|█▎        | 2/16 [00:09<01:07,  4.85s/it, loss=6.83, v_num=0]Epoch 3:  19%|█▉        | 3/16 [00:10<00:46,  3.54s/it, loss=6.83, v_num=0]Epoch 3:  19%|█▉        | 3/16 [00:11<00:47,  3.68s/it, loss=6.38, v_num=0]Epoch 3:  25%|██▌       | 4/16 [00:11<00:35,  2.97s/it, loss=6.38, v_num=0]Epoch 3:  25%|██▌       | 4/16 [00:12<00:36,  3.07s/it, loss=6.2, v_num=0] Epoch 3:  31%|███▏      | 5/16 [00:13<00:30,  2.76s/it, loss=6.2, v_num=0]Epoch 3:  31%|███▏      | 5/16 [00:14<00:31,  2.84s/it, loss=6.16, v_num=0]Epoch 3:  38%|███▊      | 6/16 [00:15<00:25,  2.53s/it, loss=6.16, v_num=0]Epoch 3:  38%|███▊      | 6/16 [00:15<00:25,  2.59s/it, loss=6.08, v_num=0]Epoch 3:  44%|████▍     | 7/16 [00:16<00:21,  2.36s/it, loss=6.08, v_num=0]Epoch 3:  44%|████▍     | 7/16 [00:16<00:21,  2.42s/it, loss=5.94, v_num=0]Epoch 3:  50%|█████     | 8/16 [00:17<00:17,  2.22s/it, loss=5.94, v_num=0]Epoch 3:  50%|█████     | 8/16 [00:18<00:18,  2.27s/it, loss=5.78, v_num=0]Epoch 3:  56%|█████▋    | 9/16 [00:19<00:15,  2.16s/it, loss=5.78, v_num=0]Epoch 3:  56%|█████▋    | 9/16 [00:19<00:15,  2.20s/it, loss=5.6, v_num=0] Epoch 3:  62%|██████▎   | 10/16 [00:20<00:12,  2.07s/it, loss=5.6, v_num=0]Epoch 3:  62%|██████▎   | 10/16 [00:21<00:12,  2.11s/it, loss=5.43, v_num=0]Epoch 3:  69%|██████▉   | 11/16 [00:21<00:09,  1.99s/it, loss=5.43, v_num=0]Epoch 3:  69%|██████▉   | 11/16 [00:22<00:10,  2.03s/it, loss=5.25, v_num=0]Epoch 3:  75%|███████▌  | 12/16 [00:23<00:07,  1.94s/it, loss=5.25, v_num=0]Epoch 3:  75%|███████▌  | 12/16 [00:23<00:07,  1.97s/it, loss=5.08, v_num=0]Epoch 3:  81%|████████▏ | 13/16 [00:24<00:05,  1.89s/it, loss=5.08, v_num=0]Epoch 3:  81%|████████▏ | 13/16 [00:25<00:05,  1.93s/it, loss=4.91, v_num=0]Epoch 3:  88%|████████▊ | 14/16 [00:25<00:03,  1.85s/it, loss=4.91, v_num=0]Epoch 3:  88%|████████▊ | 14/16 [00:26<00:03,  1.87s/it, loss=4.75, v_num=0]Epoch 3:  94%|█████████▍| 15/16 [00:27<00:01,  1.80s/it, loss=4.75, v_num=0]Epoch 3:  94%|█████████▍| 15/16 [00:27<00:01,  1.83s/it, loss=4.6, v_num=0] 
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:01<00:00,  1.23s/it][AEpoch 3: 100%|██████████| 16/16 [00:33<00:00,  2.07s/it, loss=4.6, v_num=0]
+VAL EPOCH 3 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 3: 100%|██████████| 16/16 [00:33<00:00,  2.07s/it, loss=4.6, v_num=0]
+                                                                      [A
+TRAIN EPOCH 3 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |  like birch⏎and al                       | 100.00%
+                                         | s differ nissan cy⌫yp                    | 100.00%
+                                         | awyers⏎e⌫uned                            | 100.00%
+                                         |  announces]⏎effective                    | 100.00%
+                                         | chen⏎name is used bea⌫                   | 100.00%
+--------------------------------------------------------------------------------
+Epoch 3: 100%|██████████| 16/16 [00:33<00:00,  2.07s/it, loss=4.6, v_num=0]Epoch 3, global step 60: 'val/CER' was not in top 1
+Epoch 3:   0%|          | 0/16 [00:00<?, ?it/s, loss=4.6, v_num=0]         Epoch 4:   0%|          | 0/16 [00:00<?, ?it/s, loss=4.6, v_num=0]Epoch 4:   6%|▋         | 1/16 [00:07<01:52,  7.51s/it, loss=4.6, v_num=0]Epoch 4:   6%|▋         | 1/16 [00:07<01:58,  7.92s/it, loss=4.47, v_num=0]Epoch 4:  12%|█▎        | 2/16 [00:08<01:01,  4.37s/it, loss=4.47, v_num=0]Epoch 4:  12%|█▎        | 2/16 [00:09<01:03,  4.57s/it, loss=4.34, v_num=0]Epoch 4:  19%|█▉        | 3/16 [00:09<00:43,  3.33s/it, loss=4.34, v_num=0]Epoch 4:  19%|█▉        | 3/16 [00:10<00:45,  3.46s/it, loss=4.22, v_num=0]Epoch 4:  25%|██▌       | 4/16 [00:11<00:33,  2.81s/it, loss=4.22, v_num=0]Epoch 4:  25%|██▌       | 4/16 [00:11<00:34,  2.91s/it, loss=4.13, v_num=0]Epoch 4:  31%|███▏      | 5/16 [00:13<00:29,  2.68s/it, loss=4.13, v_num=0]Epoch 4:  31%|███▏      | 5/16 [00:13<00:30,  2.76s/it, loss=4.05, v_num=0]Epoch 4:  38%|███▊      | 6/16 [00:14<00:24,  2.45s/it, loss=4.05, v_num=0]Epoch 4:  38%|███▊      | 6/16 [00:15<00:25,  2.52s/it, loss=4, v_num=0]   Epoch 4:  44%|████▍     | 7/16 [00:15<00:20,  2.27s/it, loss=4, v_num=0]Epoch 4:  44%|████▍     | 7/16 [00:16<00:20,  2.33s/it, loss=3.98, v_num=0]Epoch 4:  50%|█████     | 8/16 [00:17<00:17,  2.14s/it, loss=3.98, v_num=0]Epoch 4:  50%|█████     | 8/16 [00:17<00:17,  2.20s/it, loss=3.97, v_num=0]Epoch 4:  56%|█████▋    | 9/16 [00:19<00:15,  2.21s/it, loss=3.97, v_num=0]Epoch 4:  56%|█████▋    | 9/16 [00:20<00:15,  2.26s/it, loss=3.95, v_num=0]Epoch 4:  62%|██████▎   | 10/16 [00:21<00:12,  2.13s/it, loss=3.95, v_num=0]Epoch 4:  62%|██████▎   | 10/16 [00:21<00:13,  2.17s/it, loss=3.85, v_num=0]Epoch 4:  69%|██████▉   | 11/16 [00:22<00:10,  2.05s/it, loss=3.85, v_num=0]Epoch 4:  69%|██████▉   | 11/16 [00:22<00:10,  2.08s/it, loss=3.79, v_num=0]Epoch 4:  75%|███████▌  | 12/16 [00:23<00:07,  1.98s/it, loss=3.79, v_num=0]Epoch 4:  75%|███████▌  | 12/16 [00:24<00:08,  2.01s/it, loss=3.77, v_num=0]Epoch 4:  81%|████████▏ | 13/16 [00:24<00:05,  1.92s/it, loss=3.77, v_num=0]Epoch 4:  81%|████████▏ | 13/16 [00:25<00:05,  1.95s/it, loss=3.75, v_num=0]Epoch 4:  88%|████████▊ | 14/16 [00:26<00:03,  1.88s/it, loss=3.75, v_num=0]Epoch 4:  88%|████████▊ | 14/16 [00:26<00:03,  1.91s/it, loss=3.74, v_num=0]Epoch 4:  94%|█████████▍| 15/16 [00:27<00:01,  1.84s/it, loss=3.74, v_num=0]Epoch 4:  94%|█████████▍| 15/16 [00:28<00:01,  1.87s/it, loss=3.72, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.29it/s][AEpoch 4: 100%|██████████| 16/16 [00:33<00:00,  2.06s/it, loss=3.72, v_num=0]
+VAL EPOCH 4 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 4: 100%|██████████| 16/16 [00:33<00:00,  2.06s/it, loss=3.72, v_num=0]
+                                                                      [A
+TRAIN EPOCH 4 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | ments⏎antonio forecas                    | 100.00%
+                                         | ng film actors⏎in st                     | 100.00%
+                                         | on to the next⏎one. i                    | 100.00%
+                                         | eveloping absolu                         | 100.00%
+                                         | apoleon⏎i                                | 100.00%
+--------------------------------------------------------------------------------
+Epoch 4: 100%|██████████| 16/16 [00:33<00:00,  2.07s/it, loss=3.72, v_num=0]Epoch 4, global step 75: 'val/CER' was not in top 1
+Epoch 4:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.72, v_num=0]         Epoch 5:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.72, v_num=0]Epoch 5:   6%|▋         | 1/16 [00:07<01:52,  7.49s/it, loss=3.72, v_num=0]Epoch 5:   6%|▋         | 1/16 [00:07<01:58,  7.89s/it, loss=3.7, v_num=0] Epoch 5:  12%|█▎        | 2/16 [00:08<01:01,  4.42s/it, loss=3.7, v_num=0]Epoch 5:  12%|█▎        | 2/16 [00:09<01:04,  4.62s/it, loss=3.67, v_num=0]Epoch 5:  19%|█▉        | 3/16 [00:10<00:43,  3.38s/it, loss=3.67, v_num=0]Epoch 5:  19%|█▉        | 3/16 [00:10<00:45,  3.51s/it, loss=3.64, v_num=0]Epoch 5:  25%|██▌       | 4/16 [00:11<00:34,  2.84s/it, loss=3.64, v_num=0]Epoch 5:  25%|██▌       | 4/16 [00:11<00:35,  2.94s/it, loss=3.61, v_num=0]Epoch 5:  31%|███▏      | 5/16 [00:12<00:28,  2.56s/it, loss=3.61, v_num=0]Epoch 5:  31%|███▏      | 5/16 [00:13<00:29,  2.65s/it, loss=3.6, v_num=0] Epoch 5:  38%|███▊      | 6/16 [00:14<00:23,  2.36s/it, loss=3.6, v_num=0]Epoch 5:  38%|███▊      | 6/16 [00:14<00:24,  2.43s/it, loss=3.57, v_num=0]Epoch 5:  44%|████▍     | 7/16 [00:15<00:19,  2.22s/it, loss=3.57, v_num=0]Epoch 5:  44%|████▍     | 7/16 [00:15<00:20,  2.28s/it, loss=3.56, v_num=0]Epoch 5:  50%|█████     | 8/16 [00:16<00:16,  2.10s/it, loss=3.56, v_num=0]Epoch 5:  50%|█████     | 8/16 [00:17<00:17,  2.15s/it, loss=3.54, v_num=0]Epoch 5:  56%|█████▋    | 9/16 [00:19<00:14,  2.12s/it, loss=3.54, v_num=0]Epoch 5:  56%|█████▋    | 9/16 [00:19<00:15,  2.17s/it, loss=3.53, v_num=0]Epoch 5:  62%|██████▎   | 10/16 [00:20<00:12,  2.05s/it, loss=3.53, v_num=0]Epoch 5:  62%|██████▎   | 10/16 [00:20<00:12,  2.09s/it, loss=3.53, v_num=0]Epoch 5:  69%|██████▉   | 11/16 [00:21<00:09,  1.99s/it, loss=3.53, v_num=0]Epoch 5:  69%|██████▉   | 11/16 [00:22<00:10,  2.02s/it, loss=3.52, v_num=0]Epoch 5:  75%|███████▌  | 12/16 [00:23<00:07,  1.93s/it, loss=3.52, v_num=0]Epoch 5:  75%|███████▌  | 12/16 [00:23<00:07,  1.96s/it, loss=3.51, v_num=0]Epoch 5:  81%|████████▏ | 13/16 [00:24<00:05,  1.87s/it, loss=3.51, v_num=0]Epoch 5:  81%|████████▏ | 13/16 [00:24<00:05,  1.90s/it, loss=3.49, v_num=0]Epoch 5:  88%|████████▊ | 14/16 [00:25<00:03,  1.83s/it, loss=3.49, v_num=0]Epoch 5:  88%|████████▊ | 14/16 [00:25<00:03,  1.85s/it, loss=3.47, v_num=0]Epoch 5:  94%|█████████▍| 15/16 [00:26<00:01,  1.78s/it, loss=3.47, v_num=0]Epoch 5:  94%|█████████▍| 15/16 [00:27<00:01,  1.81s/it, loss=3.45, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.58it/s][AEpoch 5: 100%|██████████| 16/16 [00:32<00:00,  2.03s/it, loss=3.45, v_num=0]
+VAL EPOCH 5 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 5: 100%|██████████| 16/16 [00:32<00:00,  2.03s/it, loss=3.45, v_num=0]
+                                                                      [A
+TRAIN EPOCH 5 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | going to happen. maccuu                  | 100.00%
+                                         | amines change click                      | 100.00%
+                                         | hing⏎small. the particles                | 100.00%
+                                         | y coverage⏎eddie t                       | 100.00%
+                                         | ll must be⏎completely cru                | 100.00%
+--------------------------------------------------------------------------------
+Epoch 5: 100%|██████████| 16/16 [00:32<00:00,  2.03s/it, loss=3.45, v_num=0]Epoch 5, global step 90: 'val/CER' was not in top 1
+Epoch 5:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.45, v_num=0]         Epoch 6:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.45, v_num=0]Epoch 6:   6%|▋         | 1/16 [00:07<01:52,  7.47s/it, loss=3.45, v_num=0]Epoch 6:   6%|▋         | 1/16 [00:07<01:58,  7.88s/it, loss=3.45, v_num=0]Epoch 6:  12%|█▎        | 2/16 [00:08<01:01,  4.41s/it, loss=3.45, v_num=0]Epoch 6:  12%|█▎        | 2/16 [00:09<01:04,  4.61s/it, loss=3.44, v_num=0]Epoch 6:  19%|█▉        | 3/16 [00:10<00:43,  3.35s/it, loss=3.44, v_num=0]Epoch 6:  19%|█▉        | 3/16 [00:10<00:45,  3.49s/it, loss=3.44, v_num=0]Epoch 6:  25%|██▌       | 4/16 [00:11<00:33,  2.83s/it, loss=3.44, v_num=0]Epoch 6:  25%|██▌       | 4/16 [00:11<00:35,  2.93s/it, loss=3.43, v_num=0]Epoch 6:  31%|███▏      | 5/16 [00:13<00:30,  2.75s/it, loss=3.43, v_num=0]Epoch 6:  31%|███▏      | 5/16 [00:14<00:31,  2.83s/it, loss=3.42, v_num=0]Epoch 6:  38%|███▊      | 6/16 [00:14<00:24,  2.49s/it, loss=3.42, v_num=0]Epoch 6:  38%|███▊      | 6/16 [00:15<00:25,  2.56s/it, loss=3.42, v_num=0]Epoch 6:  44%|████▍     | 7/16 [00:16<00:20,  2.32s/it, loss=3.42, v_num=0]Epoch 6:  44%|████▍     | 7/16 [00:16<00:21,  2.37s/it, loss=3.41, v_num=0]Epoch 6:  50%|█████     | 8/16 [00:17<00:17,  2.18s/it, loss=3.41, v_num=0]Epoch 6:  50%|█████     | 8/16 [00:17<00:17,  2.23s/it, loss=3.41, v_num=0]Epoch 6:  56%|█████▋    | 9/16 [00:19<00:14,  2.14s/it, loss=3.41, v_num=0]Epoch 6:  56%|█████▋    | 9/16 [00:19<00:15,  2.18s/it, loss=3.41, v_num=0]Epoch 6:  62%|██████▎   | 10/16 [00:20<00:12,  2.05s/it, loss=3.41, v_num=0]Epoch 6:  62%|██████▎   | 10/16 [00:20<00:12,  2.09s/it, loss=3.4, v_num=0] Epoch 6:  69%|██████▉   | 11/16 [00:21<00:09,  1.97s/it, loss=3.4, v_num=0]Epoch 6:  69%|██████▉   | 11/16 [00:22<00:10,  2.01s/it, loss=3.4, v_num=0]Epoch 6:  75%|███████▌  | 12/16 [00:22<00:07,  1.91s/it, loss=3.4, v_num=0]Epoch 6:  75%|███████▌  | 12/16 [00:23<00:07,  1.94s/it, loss=3.4, v_num=0]Epoch 6:  81%|████████▏ | 13/16 [00:24<00:05,  1.89s/it, loss=3.4, v_num=0]Epoch 6:  81%|████████▏ | 13/16 [00:25<00:05,  1.92s/it, loss=3.4, v_num=0]Epoch 6:  88%|████████▊ | 14/16 [00:25<00:03,  1.84s/it, loss=3.4, v_num=0]Epoch 6:  88%|████████▊ | 14/16 [00:26<00:03,  1.87s/it, loss=3.4, v_num=0]Epoch 6:  94%|█████████▍| 15/16 [00:27<00:01,  1.80s/it, loss=3.4, v_num=0]Epoch 6:  94%|█████████▍| 15/16 [00:27<00:01,  1.83s/it, loss=3.39, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.38it/s][AEpoch 6: 100%|██████████| 16/16 [00:32<00:00,  2.02s/it, loss=3.39, v_num=0]
+VAL EPOCH 6 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 6: 100%|██████████| 16/16 [00:32<00:00,  2.02s/it, loss=3.39, v_num=0]
+                                                                      [A
+TRAIN EPOCH 6 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | les terry⏎thriller con                   | 100.00%
+                                         | g overcome failed workers⏎               | 100.00%
+                                         | nd drilling⏎relati                       | 100.00%
+                                         | many shanty town sett                    | 100.00%
+                                         |                                          | 0.00%
+--------------------------------------------------------------------------------
+Epoch 6: 100%|██████████| 16/16 [00:32<00:00,  2.02s/it, loss=3.39, v_num=0]Epoch 6, global step 105: 'val/CER' was not in top 1
+Epoch 6:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.39, v_num=0]         Epoch 7:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.39, v_num=0]Epoch 7:   6%|▋         | 1/16 [00:07<01:52,  7.47s/it, loss=3.39, v_num=0]Epoch 7:   6%|▋         | 1/16 [00:07<01:58,  7.87s/it, loss=3.39, v_num=0]Epoch 7:  12%|█▎        | 2/16 [00:08<01:01,  4.41s/it, loss=3.39, v_num=0]Epoch 7:  12%|█▎        | 2/16 [00:09<01:04,  4.61s/it, loss=3.39, v_num=0]Epoch 7:  19%|█▉        | 3/16 [00:10<00:43,  3.35s/it, loss=3.39, v_num=0]Epoch 7:  19%|█▉        | 3/16 [00:10<00:45,  3.48s/it, loss=3.38, v_num=0]Epoch 7:  25%|██▌       | 4/16 [00:11<00:33,  2.82s/it, loss=3.38, v_num=0]Epoch 7:  25%|██▌       | 4/16 [00:11<00:35,  2.92s/it, loss=3.38, v_num=0]Epoch 7:  31%|███▏      | 5/16 [00:13<00:30,  2.77s/it, loss=3.38, v_num=0]Epoch 7:  31%|███▏      | 5/16 [00:14<00:31,  2.85s/it, loss=3.38, v_num=0]Epoch 7:  38%|███▊      | 6/16 [00:15<00:25,  2.53s/it, loss=3.38, v_num=0]Epoch 7:  38%|███▊      | 6/16 [00:15<00:25,  2.60s/it, loss=3.38, v_num=0]Epoch 7:  44%|████▍     | 7/16 [00:16<00:21,  2.36s/it, loss=3.38, v_num=0]Epoch 7:  44%|████▍     | 7/16 [00:16<00:21,  2.42s/it, loss=3.38, v_num=0]Epoch 7:  50%|█████     | 8/16 [00:17<00:17,  2.22s/it, loss=3.38, v_num=0]Epoch 7:  50%|█████     | 8/16 [00:18<00:18,  2.27s/it, loss=3.38, v_num=0]Epoch 7:  56%|█████▋    | 9/16 [00:19<00:15,  2.16s/it, loss=3.38, v_num=0]Epoch 7:  56%|█████▋    | 9/16 [00:19<00:15,  2.21s/it, loss=3.38, v_num=0]Epoch 7:  62%|██████▎   | 10/16 [00:20<00:12,  2.08s/it, loss=3.38, v_num=0]Epoch 7:  62%|██████▎   | 10/16 [00:21<00:12,  2.12s/it, loss=3.38, v_num=0]Epoch 7:  69%|██████▉   | 11/16 [00:22<00:10,  2.01s/it, loss=3.38, v_num=0]Epoch 7:  69%|██████▉   | 11/16 [00:22<00:10,  2.04s/it, loss=3.38, v_num=0]Epoch 7:  75%|███████▌  | 12/16 [00:23<00:07,  1.94s/it, loss=3.38, v_num=0]Epoch 7:  75%|███████▌  | 12/16 [00:23<00:07,  1.98s/it, loss=3.38, v_num=0]Epoch 7:  81%|████████▏ | 13/16 [00:24<00:05,  1.89s/it, loss=3.38, v_num=0]Epoch 7:  81%|████████▏ | 13/16 [00:24<00:05,  1.92s/it, loss=3.38, v_num=0]Epoch 7:  88%|████████▊ | 14/16 [00:25<00:03,  1.84s/it, loss=3.38, v_num=0]Epoch 7:  88%|████████▊ | 14/16 [00:26<00:03,  1.87s/it, loss=3.38, v_num=0]Epoch 7:  94%|█████████▍| 15/16 [00:26<00:01,  1.80s/it, loss=3.38, v_num=0]Epoch 7:  94%|█████████▍| 15/16 [00:27<00:01,  1.82s/it, loss=3.37, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.51it/s][AEpoch 7: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.37, v_num=0]
+VAL EPOCH 7 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 7: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.37, v_num=0]
+                                                                      [A
+TRAIN EPOCH 7 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | i⌫⌫misc schemes                          | 100.00%
+                                         | yorkshire blond c                        | 100.00%
+                                         | it to remove wallpaper.                  | 100.00%
+                                         | ⏎moleu⌫cule,                             | 100.00%
+                                         | xhibit pharmacue                         | 100.00%
+--------------------------------------------------------------------------------
+Epoch 7: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.37, v_num=0]Epoch 7, global step 120: 'val/CER' was not in top 1
+Epoch 7:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.37, v_num=0]         Epoch 8:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.37, v_num=0]Epoch 8:   6%|▋         | 1/16 [00:07<01:50,  7.40s/it, loss=3.37, v_num=0]Epoch 8:   6%|▋         | 1/16 [00:07<01:57,  7.81s/it, loss=3.37, v_num=0]Epoch 8:  12%|█▎        | 2/16 [00:08<01:01,  4.37s/it, loss=3.37, v_num=0]Epoch 8:  12%|█▎        | 2/16 [00:09<01:04,  4.57s/it, loss=3.36, v_num=0]Epoch 8:  19%|█▉        | 3/16 [00:09<00:43,  3.33s/it, loss=3.36, v_num=0]Epoch 8:  19%|█▉        | 3/16 [00:10<00:44,  3.46s/it, loss=3.36, v_num=0]Epoch 8:  25%|██▌       | 4/16 [00:11<00:33,  2.81s/it, loss=3.36, v_num=0]Epoch 8:  25%|██▌       | 4/16 [00:11<00:34,  2.91s/it, loss=3.36, v_num=0]Epoch 8:  31%|███▏      | 5/16 [00:12<00:27,  2.53s/it, loss=3.36, v_num=0]Epoch 8:  31%|███▏      | 5/16 [00:13<00:28,  2.61s/it, loss=3.37, v_num=0]Epoch 8:  38%|███▊      | 6/16 [00:13<00:23,  2.32s/it, loss=3.37, v_num=0]Epoch 8:  38%|███▊      | 6/16 [00:14<00:23,  2.38s/it, loss=3.37, v_num=0]Epoch 8:  44%|████▍     | 7/16 [00:15<00:19,  2.16s/it, loss=3.37, v_num=0]Epoch 8:  44%|████▍     | 7/16 [00:15<00:19,  2.22s/it, loss=3.37, v_num=0]Epoch 8:  50%|█████     | 8/16 [00:16<00:16,  2.05s/it, loss=3.37, v_num=0]Epoch 8:  50%|█████     | 8/16 [00:16<00:16,  2.10s/it, loss=3.38, v_num=0]Epoch 8:  56%|█████▋    | 9/16 [00:19<00:14,  2.13s/it, loss=3.38, v_num=0]Epoch 8:  56%|█████▋    | 9/16 [00:19<00:15,  2.17s/it, loss=3.38, v_num=0]Epoch 8:  62%|██████▎   | 10/16 [00:20<00:12,  2.04s/it, loss=3.38, v_num=0]Epoch 8:  62%|██████▎   | 10/16 [00:20<00:12,  2.08s/it, loss=3.38, v_num=0]Epoch 8:  69%|██████▉   | 11/16 [00:21<00:09,  1.97s/it, loss=3.38, v_num=0]Epoch 8:  69%|██████▉   | 11/16 [00:22<00:10,  2.00s/it, loss=3.38, v_num=0]Epoch 8:  75%|███████▌  | 12/16 [00:22<00:07,  1.91s/it, loss=3.38, v_num=0]Epoch 8:  75%|███████▌  | 12/16 [00:23<00:07,  1.94s/it, loss=3.38, v_num=0]Epoch 8:  81%|████████▏ | 13/16 [00:24<00:05,  1.91s/it, loss=3.38, v_num=0]Epoch 8:  81%|████████▏ | 13/16 [00:25<00:05,  1.94s/it, loss=3.37, v_num=0]Epoch 8:  88%|████████▊ | 14/16 [00:25<00:03,  1.86s/it, loss=3.37, v_num=0]Epoch 8:  88%|████████▊ | 14/16 [00:26<00:03,  1.89s/it, loss=3.38, v_num=0]Epoch 8:  94%|█████████▍| 15/16 [00:27<00:01,  1.81s/it, loss=3.38, v_num=0]Epoch 8:  94%|█████████▍| 15/16 [00:27<00:01,  1.84s/it, loss=3.38, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.54it/s][AEpoch 8: 100%|██████████| 16/16 [00:32<00:00,  2.06s/it, loss=3.38, v_num=0]
+VAL EPOCH 8 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 8: 100%|██████████| 16/16 [00:33<00:00,  2.06s/it, loss=3.38, v_num=0]
+                                                                      [A
+TRAIN EPOCH 8 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | biography appointed                      | 100.00%
+                                         | nsulin⏎liabilities                       | 100.00%
+                                         | cally⏎add up infor                       | 100.00%
+                                         | xt accomplish encoura                    | 100.00%
+                                         | univere⌫se i                             | 100.00%
+--------------------------------------------------------------------------------
+Epoch 8: 100%|██████████| 16/16 [00:33<00:00,  2.06s/it, loss=3.38, v_num=0]Epoch 8, global step 135: 'val/CER' was not in top 1
+Epoch 8:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.38, v_num=0]         Epoch 9:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.38, v_num=0]Epoch 9:   6%|▋         | 1/16 [00:08<02:01,  8.08s/it, loss=3.38, v_num=0]Epoch 9:   6%|▋         | 1/16 [00:08<02:07,  8.48s/it, loss=3.38, v_num=0]Epoch 9:  12%|█▎        | 2/16 [00:09<01:06,  4.72s/it, loss=3.38, v_num=0]Epoch 9:  12%|█▎        | 2/16 [00:09<01:08,  4.92s/it, loss=3.38, v_num=0]Epoch 9:  19%|█▉        | 3/16 [00:10<00:46,  3.60s/it, loss=3.38, v_num=0]Epoch 9:  19%|█▉        | 3/16 [00:11<00:48,  3.74s/it, loss=3.38, v_num=0]Epoch 9:  25%|██▌       | 4/16 [00:12<00:36,  3.05s/it, loss=3.38, v_num=0]Epoch 9:  25%|██▌       | 4/16 [00:12<00:37,  3.15s/it, loss=3.38, v_num=0]Epoch 9:  31%|███▏      | 5/16 [00:13<00:29,  2.69s/it, loss=3.38, v_num=0]Epoch 9:  31%|███▏      | 5/16 [00:13<00:30,  2.77s/it, loss=3.38, v_num=0]Epoch 9:  38%|███▊      | 6/16 [00:14<00:24,  2.44s/it, loss=3.38, v_num=0]Epoch 9:  38%|███▊      | 6/16 [00:15<00:25,  2.51s/it, loss=3.39, v_num=0]Epoch 9:  44%|████▍     | 7/16 [00:15<00:20,  2.27s/it, loss=3.39, v_num=0]Epoch 9:  44%|████▍     | 7/16 [00:16<00:20,  2.33s/it, loss=3.38, v_num=0]Epoch 9:  50%|█████     | 8/16 [00:17<00:17,  2.14s/it, loss=3.38, v_num=0]Epoch 9:  50%|█████     | 8/16 [00:17<00:17,  2.19s/it, loss=3.38, v_num=0]Epoch 9:  56%|█████▋    | 9/16 [00:18<00:14,  2.06s/it, loss=3.38, v_num=0]Epoch 9:  56%|█████▋    | 9/16 [00:18<00:14,  2.11s/it, loss=3.38, v_num=0]Epoch 9:  62%|██████▎   | 10/16 [00:19<00:11,  1.98s/it, loss=3.38, v_num=0]Epoch 9:  62%|██████▎   | 10/16 [00:20<00:12,  2.02s/it, loss=3.37, v_num=0]Epoch 9:  69%|██████▉   | 11/16 [00:21<00:09,  1.92s/it, loss=3.37, v_num=0]Epoch 9:  69%|██████▉   | 11/16 [00:21<00:09,  1.96s/it, loss=3.37, v_num=0]Epoch 9:  75%|███████▌  | 12/16 [00:22<00:07,  1.88s/it, loss=3.37, v_num=0]Epoch 9:  75%|███████▌  | 12/16 [00:22<00:07,  1.91s/it, loss=3.37, v_num=0]Epoch 9:  81%|████████▏ | 13/16 [00:24<00:05,  1.88s/it, loss=3.37, v_num=0]Epoch 9:  81%|████████▏ | 13/16 [00:24<00:05,  1.91s/it, loss=3.37, v_num=0]Epoch 9:  88%|████████▊ | 14/16 [00:25<00:03,  1.83s/it, loss=3.37, v_num=0]Epoch 9:  88%|████████▊ | 14/16 [00:26<00:03,  1.86s/it, loss=3.36, v_num=0]Epoch 9:  94%|█████████▍| 15/16 [00:26<00:01,  1.79s/it, loss=3.36, v_num=0]Epoch 9:  94%|█████████▍| 15/16 [00:27<00:01,  1.82s/it, loss=3.36, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.51it/s][AEpoch 9: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.36, v_num=0]
+VAL EPOCH 9 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 9: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.36, v_num=0]
+                                                                      [A
+TRAIN EPOCH 9 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | ⌫can be called⏎cha                       | 100.00%
+                                         | ⌫e productions array⏎                    | 100.00%
+                                         | thong keyboards finances⏎                | 100.00%
+                                         | atements boxes⏎as                        | 100.00%
+                                         | illiant treating penins                  | 100.00%
+--------------------------------------------------------------------------------
+Epoch 9: 100%|██████████| 16/16 [00:32<00:00,  2.01s/it, loss=3.36, v_num=0]Epoch 9, global step 150: 'val/CER' was not in top 1
+Epoch 9:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.36, v_num=0]         Epoch 10:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.36, v_num=0]Epoch 10:   6%|▋         | 1/16 [00:08<02:00,  8.03s/it, loss=3.36, v_num=0]Epoch 10:   6%|▋         | 1/16 [00:08<02:06,  8.44s/it, loss=3.37, v_num=0]Epoch 10:  12%|█▎        | 2/16 [00:09<01:05,  4.70s/it, loss=3.37, v_num=0]Epoch 10:  12%|█▎        | 2/16 [00:09<01:08,  4.90s/it, loss=3.37, v_num=0]Epoch 10:  19%|█▉        | 3/16 [00:10<00:46,  3.57s/it, loss=3.37, v_num=0]Epoch 10:  19%|█▉        | 3/16 [00:11<00:48,  3.71s/it, loss=3.37, v_num=0]Epoch 10:  25%|██▌       | 4/16 [00:11<00:35,  2.99s/it, loss=3.37, v_num=0]Epoch 10:  25%|██▌       | 4/16 [00:12<00:37,  3.10s/it, loss=3.36, v_num=0]Epoch 10:  31%|███▏      | 5/16 [00:13<00:29,  2.65s/it, loss=3.36, v_num=0]Epoch 10:  31%|███▏      | 5/16 [00:13<00:30,  2.73s/it, loss=3.36, v_num=0]Epoch 10:  38%|███▊      | 6/16 [00:14<00:24,  2.42s/it, loss=3.36, v_num=0]Epoch 10:  38%|███▊      | 6/16 [00:14<00:24,  2.48s/it, loss=3.36, v_num=0]Epoch 10:  44%|████▍     | 7/16 [00:15<00:20,  2.25s/it, loss=3.36, v_num=0]Epoch 10:  44%|████▍     | 7/16 [00:16<00:20,  2.31s/it, loss=3.35, v_num=0]Epoch 10:  50%|█████     | 8/16 [00:16<00:16,  2.12s/it, loss=3.35, v_num=0]Epoch 10:  50%|█████     | 8/16 [00:17<00:17,  2.17s/it, loss=3.35, v_num=0]Epoch 10:  56%|█████▋    | 9/16 [00:18<00:14,  2.04s/it, loss=3.35, v_num=0]Epoch 10:  56%|█████▋    | 9/16 [00:18<00:14,  2.08s/it, loss=3.35, v_num=0]Epoch 10:  62%|██████▎   | 10/16 [00:19<00:11,  1.96s/it, loss=3.35, v_num=0]Epoch 10:  62%|██████▎   | 10/16 [00:19<00:11,  2.00s/it, loss=3.34, v_num=0]Epoch 10:  69%|██████▉   | 11/16 [00:20<00:09,  1.89s/it, loss=3.34, v_num=0]Epoch 10:  69%|██████▉   | 11/16 [00:21<00:09,  1.93s/it, loss=3.34, v_num=0]Epoch 10:  75%|███████▌  | 12/16 [00:22<00:07,  1.83s/it, loss=3.34, v_num=0]Epoch 10:  75%|███████▌  | 12/16 [00:22<00:07,  1.87s/it, loss=3.34, v_num=0]Epoch 10:  81%|████████▏ | 13/16 [00:23<00:05,  1.82s/it, loss=3.34, v_num=0]Epoch 10:  81%|████████▏ | 13/16 [00:24<00:05,  1.85s/it, loss=3.34, v_num=0]Epoch 10:  88%|████████▊ | 14/16 [00:24<00:03,  1.78s/it, loss=3.34, v_num=0]Epoch 10:  88%|████████▊ | 14/16 [00:25<00:03,  1.81s/it, loss=3.35, v_num=0]Epoch 10:  94%|█████████▍| 15/16 [00:26<00:01,  1.74s/it, loss=3.35, v_num=0]Epoch 10:  94%|█████████▍| 15/16 [00:26<00:01,  1.77s/it, loss=3.34, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.32it/s][AEpoch 10: 100%|██████████| 16/16 [00:31<00:00,  1.95s/it, loss=3.34, v_num=0]
+VAL EPOCH 10 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 10: 100%|██████████| 16/16 [00:31<00:00,  1.95s/it, loss=3.34, v_num=0]
+                                                                      [A
+TRAIN EPOCH 10 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | ulty construvte⌫⌫⌫cted                   | 100.00%
+                                         | lmes invoice only⏎                       | 100.00%
+                                         | criticism while being a⏎                 | 100.00%
+                                         | artists buy dry pigm                     | 100.00%
+                                         | near⌫⌫⌫⌫⌫linear producgti                | 100.00%
+--------------------------------------------------------------------------------
+Epoch 10: 100%|██████████| 16/16 [00:31<00:00,  1.95s/it, loss=3.34, v_num=0]Epoch 10, global step 165: 'val/CER' was not in top 1
+Epoch 10:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.34, v_num=0]         Epoch 11:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.34, v_num=0]Epoch 11:   6%|▋         | 1/16 [00:07<01:58,  7.89s/it, loss=3.34, v_num=0]Epoch 11:   6%|▋         | 1/16 [00:08<02:04,  8.30s/it, loss=3.34, v_num=0]Epoch 11:  12%|█▎        | 2/16 [00:09<01:03,  4.57s/it, loss=3.34, v_num=0]Epoch 11:  12%|█▎        | 2/16 [00:09<01:06,  4.77s/it, loss=3.34, v_num=0]Epoch 11:  19%|█▉        | 3/16 [00:10<00:44,  3.45s/it, loss=3.34, v_num=0]Epoch 11:  19%|█▉        | 3/16 [00:10<00:46,  3.59s/it, loss=3.34, v_num=0]Epoch 11:  25%|██▌       | 4/16 [00:11<00:34,  2.90s/it, loss=3.34, v_num=0]Epoch 11:  25%|██▌       | 4/16 [00:12<00:36,  3.00s/it, loss=3.34, v_num=0]Epoch 11:  31%|███▏      | 5/16 [00:13<00:28,  2.61s/it, loss=3.34, v_num=0]Epoch 11:  31%|███▏      | 5/16 [00:13<00:29,  2.70s/it, loss=3.34, v_num=0]Epoch 11:  38%|███▊      | 6/16 [00:14<00:23,  2.39s/it, loss=3.34, v_num=0]Epoch 11:  38%|███▊      | 6/16 [00:14<00:24,  2.46s/it, loss=3.34, v_num=0]Epoch 11:  44%|████▍     | 7/16 [00:15<00:20,  2.22s/it, loss=3.34, v_num=0]Epoch 11:  44%|████▍     | 7/16 [00:15<00:20,  2.28s/it, loss=3.33, v_num=0]Epoch 11:  50%|█████     | 8/16 [00:16<00:16,  2.10s/it, loss=3.33, v_num=0]Epoch 11:  50%|█████     | 8/16 [00:17<00:17,  2.15s/it, loss=3.33, v_num=0]Epoch 11:  56%|█████▋    | 9/16 [00:18<00:14,  2.08s/it, loss=3.33, v_num=0]Epoch 11:  56%|█████▋    | 9/16 [00:19<00:14,  2.12s/it, loss=3.32, v_num=0]Epoch 11:  62%|██████▎   | 10/16 [00:19<00:11,  1.99s/it, loss=3.32, v_num=0]Epoch 11:  62%|██████▎   | 10/16 [00:20<00:12,  2.03s/it, loss=3.32, v_num=0]Epoch 11:  69%|██████▉   | 11/16 [00:21<00:09,  1.92s/it, loss=3.32, v_num=0]Epoch 11:  69%|██████▉   | 11/16 [00:21<00:09,  1.96s/it, loss=3.32, v_num=0]Epoch 11:  75%|███████▌  | 12/16 [00:22<00:07,  1.86s/it, loss=3.32, v_num=0]Epoch 11:  75%|███████▌  | 12/16 [00:22<00:07,  1.89s/it, loss=3.32, v_num=0]Epoch 11:  81%|████████▏ | 13/16 [00:23<00:05,  1.82s/it, loss=3.32, v_num=0]Epoch 11:  81%|████████▏ | 13/16 [00:24<00:05,  1.85s/it, loss=3.32, v_num=0]Epoch 11:  88%|████████▊ | 14/16 [00:24<00:03,  1.78s/it, loss=3.32, v_num=0]Epoch 11:  88%|████████▊ | 14/16 [00:25<00:03,  1.81s/it, loss=3.32, v_num=0]Epoch 11:  94%|█████████▍| 15/16 [00:26<00:01,  1.74s/it, loss=3.32, v_num=0]Epoch 11:  94%|█████████▍| 15/16 [00:26<00:01,  1.76s/it, loss=3.31, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.52it/s][AEpoch 11: 100%|██████████| 16/16 [00:31<00:00,  1.98s/it, loss=3.31, v_num=0]
+VAL EPOCH 11 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 11: 100%|██████████| 16/16 [00:31<00:00,  1.98s/it, loss=3.31, v_num=0]
+                                                                      [A
+TRAIN EPOCH 11 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |  ⌫n the⏎sea                              | 100.00%
+                                         | egetatio cand⌫⌫⌫⌫⌫                       | 100.00%
+                                         | ble steering diversity                   | 100.00%
+                                         | ⌫⌫cal⏎inst5u⌫⌫                           | 100.00%
+                                         | ny investigators⏎                        | 100.00%
+--------------------------------------------------------------------------------
+Epoch 11: 100%|██████████| 16/16 [00:31<00:00,  1.98s/it, loss=3.31, v_num=0]Epoch 11, global step 180: 'val/CER' was not in top 1
+Epoch 11:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.31, v_num=0]         Epoch 12:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.31, v_num=0]Epoch 12:   6%|▋         | 1/16 [00:07<01:50,  7.38s/it, loss=3.31, v_num=0]Epoch 12:   6%|▋         | 1/16 [00:07<01:56,  7.78s/it, loss=3.31, v_num=0]Epoch 12:  12%|█▎        | 2/16 [00:08<01:00,  4.36s/it, loss=3.31, v_num=0]Epoch 12:  12%|█▎        | 2/16 [00:09<01:03,  4.56s/it, loss=3.31, v_num=0]Epoch 12:  19%|█▉        | 3/16 [00:09<00:43,  3.32s/it, loss=3.31, v_num=0]Epoch 12:  19%|█▉        | 3/16 [00:10<00:44,  3.46s/it, loss=3.32, v_num=0]Epoch 12:  25%|██▌       | 4/16 [00:11<00:33,  2.80s/it, loss=3.32, v_num=0]Epoch 12:  25%|██▌       | 4/16 [00:11<00:34,  2.90s/it, loss=3.31, v_num=0]Epoch 12:  31%|███▏      | 5/16 [00:12<00:27,  2.54s/it, loss=3.31, v_num=0]Epoch 12:  31%|███▏      | 5/16 [00:13<00:28,  2.62s/it, loss=3.31, v_num=0]Epoch 12:  38%|███▊      | 6/16 [00:13<00:23,  2.32s/it, loss=3.31, v_num=0]Epoch 12:  38%|███▊      | 6/16 [00:14<00:23,  2.39s/it, loss=3.31, v_num=0]Epoch 12:  44%|████▍     | 7/16 [00:15<00:19,  2.16s/it, loss=3.31, v_num=0]Epoch 12:  44%|████▍     | 7/16 [00:15<00:20,  2.22s/it, loss=3.31, v_num=0]Epoch 12:  50%|█████     | 8/16 [00:16<00:16,  2.05s/it, loss=3.31, v_num=0]Epoch 12:  50%|█████     | 8/16 [00:16<00:16,  2.10s/it, loss=3.3, v_num=0] Epoch 12:  56%|█████▋    | 9/16 [00:18<00:14,  2.06s/it, loss=3.3, v_num=0]Epoch 12:  56%|█████▋    | 9/16 [00:18<00:14,  2.10s/it, loss=3.3, v_num=0]Epoch 12:  62%|██████▎   | 10/16 [00:19<00:11,  1.98s/it, loss=3.3, v_num=0]Epoch 12:  62%|██████▎   | 10/16 [00:20<00:12,  2.02s/it, loss=3.29, v_num=0]Epoch 12:  69%|██████▉   | 11/16 [00:21<00:09,  1.91s/it, loss=3.29, v_num=0]Epoch 12:  69%|██████▉   | 11/16 [00:21<00:09,  1.95s/it, loss=3.28, v_num=0]Epoch 12:  75%|███████▌  | 12/16 [00:22<00:07,  1.86s/it, loss=3.28, v_num=0]Epoch 12:  75%|███████▌  | 12/16 [00:22<00:07,  1.89s/it, loss=3.28, v_num=0]Epoch 12:  81%|████████▏ | 13/16 [00:24<00:05,  1.87s/it, loss=3.28, v_num=0]Epoch 12:  81%|████████▏ | 13/16 [00:24<00:05,  1.91s/it, loss=3.28, v_num=0]Epoch 12:  88%|████████▊ | 14/16 [00:25<00:03,  1.83s/it, loss=3.28, v_num=0]Epoch 12:  88%|████████▊ | 14/16 [00:26<00:03,  1.86s/it, loss=3.29, v_num=0]Epoch 12:  94%|█████████▍| 15/16 [00:26<00:01,  1.80s/it, loss=3.29, v_num=0]Epoch 12:  94%|█████████▍| 15/16 [00:27<00:01,  1.82s/it, loss=3.29, v_num=0]
+Validation: 0it [00:00, ?it/s][A
+Validation:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0:   0%|          | 0/1 [00:00<?, ?it/s][A
+Validation DataLoader 0: 100%|██████████| 1/1 [00:00<00:00,  1.29it/s][AEpoch 12: 100%|██████████| 16/16 [00:32<00:00,  2.04s/it, loss=3.29, v_num=0]
+VAL EPOCH 12 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         |                                          | 0.00%
+                                         | the quick brown fox jumps                | 100.00%
+                                         | over a lazy dog⏎spiritual                | 100.00%
+                                         |  valium committees c                     | 100.00%
+                                         | ontest⏎cattle nails c                    | 100.00%
+--------------------------------------------------------------------------------
+Epoch 12: 100%|██████████| 16/16 [00:32<00:00,  2.05s/it, loss=3.29, v_num=0]
+                                                                      [A
+TRAIN EPOCH 12 - SAMPLE PREDICTIONS:
+--------------------------------------------------------------------------------
+PREDICTION                               | TARGET                                   | CER
+--------------------------------------------------------------------------------
+                                         | are small tasts⏎th                       | 100.00%
+                                         | the quick brown fox ju                   | 100.00%
+                                         | e not⏎always eaten in th                 | 100.00%
+                                         | girls customize opport                   | 100.00%
+                                         | l⏎processing. nowm m                     | 100.00%
+--------------------------------------------------------------------------------
+Epoch 12: 100%|██████████| 16/16 [00:32<00:00,  2.05s/it, loss=3.29, v_num=0]Epoch 12, global step 195: 'val/CER' was not in top 1
+Epoch 12:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.29, v_num=0]         Epoch 13:   0%|          | 0/16 [00:00<?, ?it/s, loss=3.29, v_num=0]Epoch 13:   6%|▋         | 1/16 [00:07<01:49,  7.31s/it, loss=3.29, v_num=0]Epoch 13:   6%|▋         | 1/16 [00:07<01:55,  7.72s/it, loss=3.28, v_num=0]Epoch 13:  12%|█▎        | 2/16 [00:08<01:00,  4.33s/it, loss=3.28, v_num=0]Epoch 13:  12%|█▎        | 2/16 [00:09<01:03,  4.54s/it, loss=3.29, v_num=0]Epoch 13:  19%|█▉        | 3/16 [00:09<00:43,  3.31s/it, loss=3.29, v_num=0]Epoch 13:  19%|█▉        | 3/16 [00:10<00:44,  3.44s/it, loss=3.3, v_num=0] Epoch 13:  25%|██▌       | 4/16 [00:11<00:33,  2.79s/it, loss=3.3, v_num=0]Epoch 13:  25%|██▌       | 4/16 [00:11<00:34,  2.89s/it, loss=3.29, v_num=0]Epoch 13:  31%|███▏      | 5/16 [00:12<00:28,  2.55s/it, loss=3.29, v_num=0]Epoch 13:  31%|███▏      | 5/16 [00:13<00:28,  2.63s/it, loss=3.29, v_num=0]Epoch 13:  38%|███▊      | 6/16 [00:13<00:23,  2.33s/it, loss=3.29, v_num=0]Epoch 13:  38%|███▊      | 6/16 [00:14<00:23,  2.40s/it, loss=3.3, v_num=0] Epoch 13:  44%|████▍     | 7/16 [00:15<00:19,  2.17s/it, loss=3.3, v_num=0]Epoch 13:  44%|████▍     | 7/16 [00:15<00:20,  2.23s/it, loss=3.29, v_num=0]Epoch 13:  50%|█████     | 8/16 [00:16<00:16,  2.06s/it, loss=3.29, v_num=0]Epoch 13:  50%|█████     | 8/16 [00:16<00:16,  2.11s/it, loss=3.28, v_num=0]Epoch 13:  56%|█████▋    | 9/16 [00:18<00:14,  2.04s/it, loss=3.28, v_num=0]Epoch 13:  56%|█████▋    | 9/16 [00:18<00:14,  2.08s/it, loss=3.28, v_num=0]Epoch 13:  62%|██████▎   | 10/16 [00:19<00:11,  1.97s/it, loss=3.28, v_num=0]Epoch 13:  62%|██████▎   | 10/16 [00:20<00:12,  2.01s/it, loss=3.28, v_num=0]Epoch 13:  69%|██████▉   | 11/16 [00:21<00:09,  1.91s/it, loss=3.28, v_num=0]Epoch 13:  69%|██████▉   | 11/16 [00:21<00:09,  1.95s/it, loss=3.28, v_num=0]Epoch 13:  75%|███████▌  | 12/16 [00:22<00:07,  1.87s/it, loss=3.28, v_num=0]Epoch 13:  75%|███████▌  | 12/16 [00:22<00:07,  1.90s/it, loss=3.28, v_num=0]Epoch 13:  81%|████████▏ | 13/16 [00:23<00:05,  1.83s/it, loss=3.28, v_num=0]

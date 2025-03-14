@@ -1,0 +1,27 @@
+EMG2QWERTY Cross-Experiment Detailed Summary
+===========================================
+
+Experiment: rnn_cnn_bandpass_filter
+  Model: rnn
+  Transform: cnn_bandpass_filter
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 22.260644912719727
+
+Experiment: rnn_cnn_cross_channel_mixing
+  Model: rnn
+  Transform: cnn_cross_channel_mixing
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 16.274044036865234
+
+Experiment: rnn_cnn_temporal_scaling
+  Model: rnn
+  Transform: cnn_temporal_scaling
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 26.864059448242188
+

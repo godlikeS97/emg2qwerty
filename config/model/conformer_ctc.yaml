@@ -20,7 +20,7 @@ module:
   activation: "swish"  # Swish activation typically performs better
   max_seq_length: 1000  # Maximum sequence length for positional encoding
   norm_first: True  # Pre-normalization (more stable)
-  enforce_mask: True  # Strictly enforce attention masking (important!)
+  enforce_mask: False  # Strictly enforce attention masking (important!)
   layer_dropout: 0.05  # Chance to drop entire layers during training
 
 # Data configuration - same as other models for fair comparison

@@ -1,0 +1,27 @@
+EMG2QWERTY Cross-Experiment Detailed Summary
+===========================================
+
+Experiment: tds_conv_ctc_bandpass_filter
+  Model: tds
+  Transform: conv_ctc_bandpass_filter
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 26.19407844543457
+
+Experiment: tds_conv_ctc_cross_channel_mixing
+  Model: tds
+  Transform: conv_ctc_cross_channel_mixing
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 22.909011840820312
+
+Experiment: tds_conv_ctc_temporal_scaling
+  Model: tds
+  Transform: conv_ctc_temporal_scaling
+  Final Accuracy: N/A
+  Final WER: N/A
+  Validation CER: N/A
+  Test CER: 27.10179328918457
+
