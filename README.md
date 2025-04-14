@@ -128,7 +128,7 @@ The 6-gram character-level language model, used by the first-pass beam-search de
 2. Run `./scripts/lm/build_char_lm.sh <ngram_order>`
 
 ## Report Links
--[EMG to Text: Enhancing Signal Translation throughDeep Learning and Data Augmentation](https://drive.google.com/file/d/1uZGa7-W5c1KfBxGFn5f-PRf6-mre7_hp/view?usp=drive_link)
+[EMG to Text: Enhancing Signal Translation throughDeep Learning and Data Augmentation](https://drive.google.com/file/d/1uZGa7-W5c1KfBxGFn5f-PRf6-mre7_hp/view?usp=drive_link)
 
 ## License
 
